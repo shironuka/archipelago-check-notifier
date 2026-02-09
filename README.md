@@ -268,6 +268,7 @@ Once deployed, the bot provides these slash commands:
     - `mention_hints` - @ you for hints (default: true)
 - `/unlink` - Remove a link
 - `/links` - Show all links in the server
+- `/refresh` - Disconnect and reconnect an Archipelago monitor.
 
 ---
 
@@ -285,7 +286,8 @@ Once deployed, the bot provides these slash commands:
 │   │   ├── unmonitorcommand.ts # /unmonitor slash command
 │   │   ├── linkcommand.ts      # /link slash command
 │   │   ├── unlinkcommand.ts    # /unlink slash command
-│   │   └── linkscommand.ts     # /links slash command
+│   │   ├── linkscommand.ts     # /links slash command
+│   │   └── refreshcommand.ts   # /refresh slash command
 │   └── utils/
 │       └── database.ts   # MySQL database operations
 ├── tsconfig.json         # TypeScript configuration

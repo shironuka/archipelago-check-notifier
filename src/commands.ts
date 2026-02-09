@@ -6,6 +6,7 @@ import PingCommand from './commands/pingcommand'
 import LinkCommand from './commands/linkcommand'
 import UnlinkCommand from './commands/unlinkcommand'
 import LinksCommand from './commands/linkscommand'
+import RefreshCommand from './commands/refreshcommand'
 let restClient: REST
 
 const commandList: Command[] = [
@@ -22,6 +23,7 @@ async function Init (client: Client) {
   commandList.push(new LinkCommand(client))
   commandList.push(new UnlinkCommand(client))
   commandList.push(new LinksCommand(client))
+  commandList.push(new RefreshCommand(client))
 
   if (client.token == null || client.application == null) return
 

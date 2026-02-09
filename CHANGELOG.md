@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-02-09
+
+### Added
+- **Refresh Command:** Added `/refresh` command to manually disconnect and reconnect Archipelago monitors.
+    - Displays a list of active monitors for the current server.
+    - Each monitor has a "Refresh" button to force a reconnection.
+    - Useful for resolving monitoring issues after extended periods of inactivity.
+
+### Changed
+- Updated documentation and project architecture overview to include the new command.
+
 ## [1.5.2] - 2026-02-06
 
 ### Fixed
