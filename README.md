@@ -304,4 +304,4 @@ See the original repository for license information.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
+See [CHANGELOG.md](CHANGELOG.md) for a full history of changes. 
