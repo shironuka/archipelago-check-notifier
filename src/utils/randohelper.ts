@@ -1,7 +1,7 @@
 import { Client, GamePackage, ITEM_FLAGS } from 'archipelago.js'
 
 function getItem (client: Client, playerId: number, itemId: number, flag: number): string {
-  const game: string | undefined = client.players.get(playerId)?.game
+  const game: string | undefined = client.players.findPlayer(playerId)?.game
   if (game === undefined) return 'Unknown Item'
 
   const dataPackage: GamePackage | undefined = client.data.package.get(game)
@@ -23,7 +23,7 @@ function getItem (client: Client, playerId: number, itemId: number, flag: number
 }
 
 function getLocation (client: Client, playerId: number, locationId: number) {
-  const game: string | undefined = client.players.get(playerId)?.game
+  const game: string | undefined = client.players.findPlayer(playerId)?.game
   if (game === undefined) return 'Unknown Location'
 
   const dataPackage: GamePackage | undefined = client.data.package.get(game)
