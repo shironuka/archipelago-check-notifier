@@ -12,7 +12,7 @@ import Monitors from '../utils/monitors'
 import Database from '../utils/database'
 
 export default class MonitorCommand extends Command {
-  name = 'monitor'
+  name = 'monitor2'
   description = 'Start tracking an Archipelago session.'
 
   options: ApplicationCommandOption[] = [
