@@ -7,16 +7,17 @@ import LinkCommand from './commands/linkcommand'
 import UnlinkCommand from './commands/unlinkcommand'
 import LinksCommand from './commands/linkscommand'
 import RefreshCommand from './commands/refreshcommand'
+
 let restClient: REST
 
-const commandList: Command[] = [
-]
+const commandList: Command[] = []
 
-const debugCommandList: Command[] = [
-
-]
+const debugCommandList: Command[] = []
 
 async function Init (client: Client) {
+  commandList.length = 0
+  debugCommandList.length = 0
+
   commandList.push(new PingCommand(client))
   commandList.push(new MonitorCommand(client))
   commandList.push(new UnmonitorCommand(client))
@@ -29,30 +30,47 @@ async function Init (client: Client) {
 
   restClient = new REST({ version: '10' }).setToken(client.token)
 
-  // Register slash commands with Discord.js rest
+  const commands = GetCommands()
+  const debugCommands = GetDebugCommands()
+
   if (process.env.GUILD_ID) {
-    await restClient.put(Routes.applicationGuildCommands(client.application?.id, process.env.GUILD_ID), { body: GetDebugCommands() })
+    await restClient.put(
+      Routes.applicationGuildCommands(client.application.id, process.env.GUILD_ID),
+      { body: [...commands, ...debugCommands] }
+    )
   }
-  await restClient.put(Routes.applicationCommands(client.application?.id), { body: GetCommands() })
+
+  await restClient.put(
+    Routes.applicationCommands(client.application.id),
+    { body: commands }
+  )
 }
 
 function GetCommands () {
-  return commandList.map(command => ({ name: command.name, description: command.description, options: command.options }))
+  return commandList.map(command => ({
+    name: command.name,
+    description: command.description,
+    options: command.options
+  }))
 }
 
 function GetDebugCommands () {
-  return debugCommandList.map(command => ({ name: command.name, description: command.description, options: command.options }))
+  return debugCommandList.map(command => ({
+    name: command.name,
+    description: command.description,
+    options: command.options
+  }))
 }
 
 function Autocomplete (interaction: AutocompleteInteraction) {
-  const command = commandList.find(command => command.name === interaction.commandName)
+  const command = [...commandList, ...debugCommandList].find(command => command.name === interaction.commandName)
   if (command == null) return
 
   command.autocomplete(interaction)
 }
 
 function Execute (interaction: CommandInteraction) {
-  const command = commandList.find(command => command.name === interaction.commandName)
+  const command = [...commandList, ...debugCommandList].find(command => command.name === interaction.commandName)
   if (command == null) return
 
   if (interaction.isChatInputCommand()) {
