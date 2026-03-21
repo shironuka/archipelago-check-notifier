@@ -211,8 +211,7 @@ stop () {
 
     const connectionOptions = {
       items: itemsHandlingFlags.all,
-      tags: ['Tracker'],
-      version: { major: 0, minor: 5, build: 0 }
+      tags: ['Tracker']
     }
 
     this.client.login(
