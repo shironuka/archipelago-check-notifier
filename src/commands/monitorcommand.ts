@@ -1,24 +1,83 @@
 import Command from '../classes/command'
-import { ApplicationCommandOption, ApplicationCommandOptionType, ChannelType, ChatInputCommandInteraction, MessageFlags } from 'discord.js'
+import {
+  ApplicationCommandOption,
+  ApplicationCommandOptionType,
+  AutocompleteInteraction,
+  ChannelType,
+  ChatInputCommandInteraction,
+  MessageFlags
+} from 'discord.js'
 import MonitorData from '../classes/monitordata'
 import Monitors from '../utils/monitors'
 import Database from '../utils/database'
 
 export default class MonitorCommand extends Command {
   name = 'monitor'
-  description = 'Start tracking an archipelago session.'
+  description = 'Start tracking an Archipelago session.'
 
   options: ApplicationCommandOption[] = [
-    { type: ApplicationCommandOptionType.String, name: 'host', description: 'The host to use', required: true },
-    { type: ApplicationCommandOptionType.Integer, name: 'port', description: 'The port to use', required: true },
-    { type: ApplicationCommandOptionType.String, name: 'game', description: 'The game to monitor', required: true },
-    { type: ApplicationCommandOptionType.String, name: 'player', description: 'The player to monitor', required: true },
-    { type: ApplicationCommandOptionType.Channel, channelTypes: [ChannelType.GuildText], name: 'channel', description: 'The channel to send messages to', required: true },
-    { type: ApplicationCommandOptionType.Boolean, name: 'mention_join_leave', description: 'Whether to @ people for joining or leaving (default: false)', required: false },
-    { type: ApplicationCommandOptionType.Boolean, name: 'mention_item_finder', description: 'Whether to @ people when they find an item (default: true)', required: false },
-    { type: ApplicationCommandOptionType.Boolean, name: 'mention_item_receiver', description: 'Whether to @ people when they receive an item (default: true)', required: false },
-    { type: ApplicationCommandOptionType.Boolean, name: 'mention_completion', description: 'Whether to @ people when they complete their goal (default: true)', required: false },
-    { type: ApplicationCommandOptionType.Boolean, name: 'mention_hints', description: 'Whether to @ people when they are mentioned in a hint (default: true)', required: false }
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'host',
+      description: 'The host to connect to',
+      required: true,
+      autocomplete: true
+    },
+    {
+      type: ApplicationCommandOptionType.Integer,
+      name: 'port',
+      description: 'The port to use',
+      required: true
+    },
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'game',
+      description: 'Optional game name',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'player',
+      description: 'The Archipelago slot/player name',
+      required: true
+    },
+    {
+      type: ApplicationCommandOptionType.Channel,
+      channelTypes: [ChannelType.GuildText],
+      name: 'channel',
+      description: 'The channel to send messages to',
+      required: true
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'mention_join_leave',
+      description: 'Whether to @ people for joining or leaving (default: false)',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'mention_item_finder',
+      description: 'Whether to @ people when they find an item (default: true)',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'mention_item_receiver',
+      description: 'Whether to @ people when they receive an item (default: true)',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'mention_completion',
+      description: 'Whether to @ people when they complete their goal (default: true)',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'mention_hints',
+      description: 'Whether to @ people when they are mentioned in a hint (default: true)',
+      required: false
+    }
   ]
 
   constructor (client: any) {
@@ -27,33 +86,36 @@ export default class MonitorCommand extends Command {
   }
 
   validate (interaction: ChatInputCommandInteraction) {
-    const host = interaction.options.getString('host', true)
+    const host = interaction.options.getString('host', true).trim()
 
-    // regex for domain or IP address - eg. archipelago.gg
-    const hostRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/
+    // allow common domain-style hosts like archipelago.gg or custom domains
+    const hostRegex = /^(localhost|(([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}))$/
     if (!hostRegex.test(host)) {
-      interaction.reply({ content: 'Invalid host name format. Please use domain name (e.g: archipelago.gg)', flags: [MessageFlags.Ephemeral] })
+      interaction.reply({
+        content: 'Invalid host name format.\nPlease use a domain like archipelago.gg or localhost.',
+        flags: [MessageFlags.Ephemeral]
+      })
       return false
     }
 
     const channel = interaction.options.getChannel('channel', true)
     if (channel == null) return false
-
-    // Only add to channels in this guild
     if (interaction.guild?.channels.cache.get(channel.id) == null) return false
 
     return true
   }
 
   execute (interaction: ChatInputCommandInteraction) {
-    // Validate text input.
     if (!this.validate(interaction)) return
 
+    const host = interaction.options.getString('host', true).trim()
+    const game = interaction.options.getString('game')?.trim()
+
     const monitorData: MonitorData = {
-      game: interaction.options.getString('game', true),
-      player: interaction.options.getString('player', true),
-      host: interaction.options.getString('host', true),
+      host,
       port: interaction.options.getInteger('port', true),
+      game: game != null && game.length > 0 ? game : undefined,
+      player: interaction.options.getString('player', true).trim(),
       channel: interaction.options.getChannel('channel', true).id,
       mention_join_leave: interaction.options.getBoolean('mention_join_leave') ?? false,
       mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? true,
@@ -62,27 +124,51 @@ export default class MonitorCommand extends Command {
       mention_hints: interaction.options.getBoolean('mention_hints') ?? true
     }
 
-    // Only allow one monitor per host/port/player combo
-    if (Monitors.has(`${monitorData.host}:${monitorData.port}`)) {
-      return interaction.reply({ content: 'Already monitoring that host!', flags: [MessageFlags.Ephemeral] })
+    const uri = `${monitorData.host}:${monitorData.port}`
+
+    if (Monitors.has(uri)) {
+      interaction.reply({
+        content: `Already monitoring ${uri}.`,
+        flags: [MessageFlags.Ephemeral]
+      })
+      return
     }
 
-    // Send a message to the channel to confirm the monitor has been added.
-    const textChannel = this.client.channels.cache.get(monitorData.channel)
-    if (textChannel?.isTextBased()) {
-      (textChannel as any).send('This monitor will now track Archipelago on this channel.').catch(console.error)
-    } else {
-      return interaction.reply({ content: 'Could not find the specified channel in cache or it is not text-based.', flags: [MessageFlags.Ephemeral] })
-    }
+    interaction.reply({
+      content: `Attempting to monitor ${uri}...`,
+      flags: [MessageFlags.Ephemeral]
+    }).catch(console.error)
 
-    // Make the monitor and save it
     Monitors.make(monitorData, this.client).then(async (monitor) => {
       monitor.data.id = await Database.makeConnection(monitorData)
-    }).catch(err => {
+      await interaction.followUp({
+        content: `Now monitoring ${uri}.`,
+        flags: [MessageFlags.Ephemeral]
+      }).catch(console.error)
+    }).catch(async (err) => {
       console.error('Failed to create monitor:', err)
-      interaction.followUp({ content: 'Failed to connect to Archipelago. Please check host and port.', flags: [MessageFlags.Ephemeral] })
+      await interaction.followUp({
+        content: 'Failed to connect to Archipelago. Please check host, port, player, and optional game.',
+        flags: [MessageFlags.Ephemeral]
+      }).catch(console.error)
     })
+  }
 
-    interaction.reply({ content: `Now monitoring Archipelago on ${monitorData.host}:${monitorData.port}.`, flags: [MessageFlags.Ephemeral] })
+  autocomplete (interaction: AutocompleteInteraction): void {
+    const focused = interaction.options.getFocused().trim().toLowerCase()
+
+    const suggestions = [
+      'archipelago.gg'
+    ]
+
+    const filtered = suggestions
+      .filter(host => focused.length === 0 || host.toLowerCase().includes(focused))
+      .slice(0, 25)
+      .map(host => ({
+        name: host,
+        value: host
+      }))
+
+    void interaction.respond(filtered)
   }
 }

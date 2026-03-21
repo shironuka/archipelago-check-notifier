@@ -8,6 +8,16 @@ const monitors: Monitor[] = []
 
 function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   return new Promise<Monitor>((resolve, reject) => {
+    const existing = monitors.find(
+      monitor => `${monitor.data.host}:${monitor.data.port}` === `${data.host}:${data.port}`
+    )
+
+    if (existing != null) {
+      console.log(`Already monitoring ${data.host}:${data.port}, skipping...`)
+      resolve(existing)
+      return
+    }
+
     const archi = new Client()
 
     const connectionOptions = {
@@ -15,12 +25,13 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       tags: ['Tracker']
     }
 
-    archi.login(
-      `${data.host}:${data.port}`, // address
-      data.player,                 // slot name
-      data.game,                   // game (IMPORTANT — was missing before)
-      connectionOptions            // options
-    ).then(() => {
+    const uri = `${data.host}:${data.port}`
+
+    const loginPromise = data.game != null && data.game.length > 0
+      ? archi.login(uri, data.player, data.game, connectionOptions)
+      : archi.login(uri, data.player, undefined, connectionOptions)
+
+    loginPromise.then(() => {
       const monitor = new Monitor(archi, data, client)
       Database.createLog(monitor.guild.id, '0', `Connected to ${data.host}:${data.port}`)
       monitors.push(monitor)

@@ -2,7 +2,7 @@ export default class MonitorData {
   id?: number
   host: string
   port: number
-  game: string
+  game?: string
   player: string
   channel: string
   mention_join_leave: boolean
