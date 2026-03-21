@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "archipelago.js": "^1.1.0",
+    "archipelago.js": "^2.0.4",
     "discord.js": "^14.25.1",
     "mysql2": "^3.6.0"
   },
