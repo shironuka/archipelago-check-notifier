@@ -14,7 +14,7 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       port: data.port,
       game: data.game,
       name: data.player,
-      items_handling: ITEMS_HANDLING_FLAGS.ALL,
+      items_handling: itemsHandlingFlags.all,
       tags: ['IgnoreGame', 'Tracker', 'Monitor'],
       version: { major: 0, minor: 5, build: 0 }
     }
