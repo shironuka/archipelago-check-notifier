@@ -15,7 +15,7 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       version: { major: 0, minor: 5, build: 5 }
     }
 
-    archi.login(`${data.host}:${data.port}`, connectionOptions).then(() => {
+    archi.login(`${data.host}:${data.port}`, connectionInfo).then(() => {
       const monitor = new Monitor(archi, data, client)
       Database.createLog(monitor.guild.id, '0', `Connected to ${data.host}:${data.port}`)
       monitors.push(monitor)
