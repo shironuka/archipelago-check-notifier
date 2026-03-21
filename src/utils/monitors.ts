@@ -12,8 +12,7 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
 
     const connectionOptions = {
       items: itemsHandlingFlags.all,
-      tags: ['Tracker'],
-      version: { major: 0, minor: 5, build: 0 }
+      tags: ['Tracker']
     }
 
     archi.login(
