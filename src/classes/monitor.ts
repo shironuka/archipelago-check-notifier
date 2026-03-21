@@ -1,5 +1,5 @@
 import { EmbedBuilder, Guild, Client as DiscordClient, GuildChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js'
-import { Client, CollectJSONPacket, HintJSONPacket, ITEMS_HANDLING_FLAGS, ItemSendJSONPacket, PrintJSONPacket, SERVER_PACKET_TYPE, SlotData } from 'archipelago.js'
+import { Client, CollectJSONPacket, HintJSONPacket, ItemSendJSONPacket, PrintJSONPacket, SlotData, itemsHandlingFlags } from 'archipelago.js'
 import MonitorData from './monitordata'
 import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
@@ -10,7 +10,7 @@ export default class Monitor {
   guild: Guild
   data: MonitorData
 
-  isReconnecting: boolean
+  isReconnecting: boolean = false
   isActive: boolean = true
   reconnectTimeout: any = null
 
@@ -81,7 +81,6 @@ export default class Monitor {
   sendQueue () {
     const hints = this.queue.hints.map((message, index) => ({ name: `#${index + 1}`, value: message }))
     this.queue.hints = []
-    // split into multiple messages if there are too many items
     while (hints.length > 0) {
       const batch = hints.splice(0, 25)
       const mentions = new Set<string>()
@@ -100,7 +99,6 @@ export default class Monitor {
 
     const items = this.queue.items.map((message, index) => ({ name: `#${index + 1}`, value: message }))
     this.queue.items = []
-    // split into multiple messages if there are too many items
     while (items.length > 0) {
       const batch = items.splice(0, 25)
       const mentions = new Set<string>()
@@ -119,7 +117,6 @@ export default class Monitor {
   }
 
   send (message: string, components?: any[]) {
-    // make an embed for the message
     const embed = new EmbedBuilder().setDescription(message).setTitle('Archipelago')
 
     const mentions = new Set<string>()
@@ -145,9 +142,9 @@ export default class Monitor {
     this.channel = channel
     this.guild = channel.guild
 
-    client.addListener(SERVER_PACKET_TYPE.CONNECTION_REFUSED, this.onDisconnect.bind(this))
-    ;(client as any).on?.('disconnected', this.onDisconnect.bind(this))
-    client.addListener(SERVER_PACKET_TYPE.PRINT_JSON, this.onJSON.bind(this))
+    this.client.socket.on('connectionRefused', this.onDisconnect.bind(this))
+    this.client.socket.on('disconnected', this.onDisconnect.bind(this))
+    this.client.socket.on('printJSON', this.onJSON.bind(this))
   }
 
   onDisconnect () {
@@ -170,14 +167,18 @@ export default class Monitor {
   reconnect () {
     if (!this.isActive) return
 
-    this.client.connect({
-      game: this.data.game,
-      hostname: this.data.host,
-      port: this.data.port,
-      name: this.data.player,
-      items_handling: ITEMS_HANDLING_FLAGS.REMOTE_ALL,
+    const connectionOptions = {
+      items: itemsHandlingFlags.all,
+      tags: ['Tracker'],
       version: { major: 0, minor: 5, build: 0 }
-    }).then(() => {
+    }
+
+    this.client.login(
+      `${this.data.host}:${this.data.port}`,
+      this.data.player,
+      this.data.game,
+      connectionOptions
+    ).then(() => {
       this.isReconnecting = false
     }).catch(() => {
       if (!this.isActive) return
@@ -187,6 +188,7 @@ export default class Monitor {
       }, 300000)
     })
   }
+
 
   // When a message is received from the server
   async onJSON (packet: PrintJSONPacket) {
