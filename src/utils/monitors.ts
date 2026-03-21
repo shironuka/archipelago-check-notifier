@@ -1,5 +1,5 @@
 import MonitorData from '../classes/monitordata'
-import { Client, ConnectionInformation, ITEMS_HANDLING_FLAGS } from 'archipelago.js'
+import { Client, ConnectionInformation, itemsHandlingFlags } from 'archipelago.js'
 import Monitor from '../classes/monitor'
 import { Client as DiscordClient } from 'discord.js'
 import Database from './database'
