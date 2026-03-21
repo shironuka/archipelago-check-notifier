@@ -46,23 +46,25 @@ export default class UnmonitorCommand extends Command {
     })
   }
 
-  autocomplete (interaction: AutocompleteInteraction): void {
-    if (interaction.guildId == null) {
-      void interaction.respond([])
-      return
-    }
-
-    const focused = interaction.options.getFocused().toLowerCase()
-
-    const choices = Monitors.get(interaction.guildId)
-      .map(monitor => {
-        const uri = monitor.client.uri ?? `${monitor.data.host}:${monitor.data.port}`
-        return { name: uri, value: uri }
-      })
-      .filter(choice => choice.name.length >= 1 && choice.name.length <= 100)
-      .filter(choice => focused.length === 0 || choice.name.toLowerCase().includes(focused))
-      .slice(0, 25)
-
-    void interaction.respond(choices)
+autocomplete (interaction: AutocompleteInteraction): void {
+  if (interaction.guildId == null) {
+    void interaction.respond([])
+    return
   }
+
+  const focused = interaction.options.getFocused().toLowerCase()
+
+  const uniqueChoices = new Map<string, { name: string, value: string }>()
+
+  for (const monitor of Monitors.get(interaction.guildId)) {
+    const uri = monitor.client.uri ?? `${monitor.data.host}:${monitor.data.port}`
+    if (uri.length < 1 || uri.length > 100) continue
+    if (focused.length > 0 && !uri.toLowerCase().includes(focused)) continue
+
+    if (!uniqueChoices.has(uri)) {
+      uniqueChoices.set(uri, { name: uri, value: uri })
+    }
+  }
+
+  void interaction.respond(Array.from(uniqueChoices.values()).slice(0, 25))
 }
