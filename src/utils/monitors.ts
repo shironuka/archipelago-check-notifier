@@ -9,17 +9,13 @@ const monitors: Monitor[] = []
 function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   return new Promise<Monitor>((resolve, reject) => {
     const archi = new Client()
-    const connectionInfo: ConnectionInformation = {
-      hostname: data.host,
-      port: data.port,
-      game: data.game,
-      name: data.player,
-      items_handling: itemsHandlingFlags.all,
-      tags: ['IgnoreGame', 'Tracker', 'Monitor'],
-      version: { major: 0, minor: 5, build: 0 }
+    const connectionInfo: ConnectionOptions = {
+      items: itemsHandlingFlags.all,
+      tags: ['Tracker'],
+      version: { major: 0, minor: 5, build: 5 }
     }
 
-    archi.login(connectionInfo).then(() => {
+    archi.login(`${data.host}:${data.port}`, connectionOptions).then(() => {
       const monitor = new Monitor(archi, data, client)
       Database.createLog(monitor.guild.id, '0', `Connected to ${data.host}:${data.port}`)
       monitors.push(monitor)
