@@ -1,5 +1,11 @@
 import Command from '../classes/command'
-import { ApplicationCommandOption, ApplicationCommandOptionType, AutocompleteInteraction, ChatInputCommandInteraction, MessageFlags } from 'discord.js'
+import {
+  ApplicationCommandOption,
+  ApplicationCommandOptionType,
+  AutocompleteInteraction,
+  ChatInputCommandInteraction,
+  MessageFlags
+} from 'discord.js'
 import Monitors from '../utils/monitors'
 
 export default class UnmonitorCommand extends Command {
@@ -7,7 +13,13 @@ export default class UnmonitorCommand extends Command {
   description = 'Stop tracking an archipelago session.'
 
   options: ApplicationCommandOption[] = [
-    { type: ApplicationCommandOptionType.String, name: 'uri', description: 'The URI of the archipelago room to remove.', required: true, autocomplete: true }
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'uri',
+      description: 'The URI of the archipelago room to remove.',
+      required: true,
+      autocomplete: true
+    }
   ]
 
   constructor (client: any) {
@@ -18,18 +30,39 @@ export default class UnmonitorCommand extends Command {
   execute (interaction: ChatInputCommandInteraction) {
     const uri = interaction.options.getString('uri', true)
 
-    // Do not remove if there is no monitor
     if (!Monitors.has(uri)) {
-      interaction.reply({ content: `There is no active monitor on ${uri}.`, flags: [MessageFlags.Ephemeral] })
+      interaction.reply({
+        content: `There is no active monitor on ${uri}.`,
+        flags: [MessageFlags.Ephemeral]
+      })
       return
     }
 
     Monitors.remove(uri)
-    interaction.reply({ content: `The tracker will no longer track ${uri}.`, flags: [MessageFlags.Ephemeral] })
+
+    interaction.reply({
+      content: `The tracker will no longer track ${uri}.`,
+      flags: [MessageFlags.Ephemeral]
+    })
   }
 
   autocomplete (interaction: AutocompleteInteraction): void {
-    if (interaction.guildId == null) return
-    interaction.respond(Monitors.get(interaction.guildId).map(monitor => ({ name: monitor.client.uri || '', value: monitor.client.uri || '' })))
+    if (interaction.guildId == null) {
+      void interaction.respond([])
+      return
+    }
+
+    const focused = interaction.options.getFocused().toLowerCase()
+
+    const choices = Monitors.get(interaction.guildId)
+      .map(monitor => {
+        const uri = monitor.client.uri ?? `${monitor.data.host}:${monitor.data.port}`
+        return { name: uri, value: uri }
+      })
+      .filter(choice => choice.name.length >= 1 && choice.name.length <= 100)
+      .filter(choice => focused.length === 0 || choice.name.toLowerCase().includes(focused))
+      .slice(0, 25)
+
+    void interaction.respond(choices)
   }
 }
