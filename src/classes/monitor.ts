@@ -30,14 +30,14 @@ export default class Monitor {
   isActive: boolean = true
   reconnectTimeout: any = null
 
-  stop () {
-    this.isActive = false
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout)
-      this.reconnectTimeout = null
-    }
-    this.client.disconnect()
+stop () {
+  this.isActive = false
+  if (this.reconnectTimeout) {
+    clearTimeout(this.reconnectTimeout)
+    this.reconnectTimeout = null
   }
+  this.client.socket.disconnect()
+}
 
   queue = {
     hints: [] as string[],
