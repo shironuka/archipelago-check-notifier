@@ -125,7 +125,7 @@ In Railway, go to your bot service and add these variables:
 
 **Cause:** Archipelago server requires a newer protocol version than the client defaults to.
 
-**Solution:** This bot has been updated (v1.1.1+) to default to protocol version 0.5.0, which is compatible with `archipelago.gg` and most modern servers. Ensure you are using the latest version of the bot.
+**Solution:** This bot has been updated (v2.0.4), which is compatible with `archipelago.gg` and most modern servers. Ensure you are using the latest version of the bot.
 
 ---
 
