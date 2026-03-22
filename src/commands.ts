@@ -7,6 +7,7 @@ import LinkCommand from './commands/linkcommand'
 import UnlinkCommand from './commands/unlinkcommand'
 import LinksCommand from './commands/linkscommand'
 import RefreshCommand from './commands/refreshcommand'
+import MonitorAdvanceCommand from './commands/monitoradvancecommand'
 
 let restClient: REST
 
@@ -25,6 +26,7 @@ async function Init (client: Client) {
   commandList.push(new UnlinkCommand(client))
   commandList.push(new LinksCommand(client))
   commandList.push(new RefreshCommand(client))
+  commandList.push(new MonitorAdvanceCommand(client))
 
   if (client.token == null || client.application == null) return
 

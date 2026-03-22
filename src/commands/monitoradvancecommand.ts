@@ -11,11 +11,18 @@ import MonitorData from '../classes/monitordata'
 import Monitors from '../utils/monitors'
 import Database from '../utils/database'
 
-export default class MonitorCommand extends Command {
-  name = 'monitor'
-  description = 'Start tracking an Archipelago session (archipelago.gg).'
+export default class MonitorAdvanceCommand extends Command {
+  name = 'monitor-advance'
+  description = 'Start tracking an Archipelago session (custom host).'
 
   options: ApplicationCommandOption[] = [
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'host',
+      description: 'The host to connect to',
+      required: true,
+      autocomplete: true
+    },
     {
       type: ApplicationCommandOptionType.Integer,
       name: 'port',
@@ -88,30 +95,54 @@ export default class MonitorCommand extends Command {
 
     const focused = interaction.options.getFocused(true)
 
-    if (focused.name === 'port') {
-      const typed = String(focused.value ?? '').trim()
-      const choices = new Map<number, { name: string, value: number }>()
+    if (focused.name === 'host') {
+      const typed = String(focused.value ?? '').trim().toLowerCase()
+      const choices = new Map<string, { name: string, value: string }>()
+
+      choices.set('archipelago.gg', { name: 'archipelago.gg', value: 'archipelago.gg' })
 
       for (const monitor of Monitors.get(interaction.guildId)) {
-        if (monitor.data.host !== 'archipelago.gg') continue
-        const port = monitor.data.port
-        const label = `archipelago.gg:${port}`
-        if (!choices.has(port)) {
-          choices.set(port, { name: label, value: port })
+        const host = monitor.data.host?.trim()
+        if (host && !choices.has(host.toLowerCase())) {
+          choices.set(host.toLowerCase(), { name: host, value: host })
         }
       }
 
-      const commonPorts = [38281]
+      const results = Array.from(choices.values())
+        .filter(choice => typed.length === 0 || choice.name.toLowerCase().includes(typed))
+        .slice(0, 25)
+
+      await interaction.respond(results)
+      return
+    }
+
+    if (focused.name === 'port') {
+      const typed = String(focused.value ?? '').trim()
+      const selectedHost = interaction.options.getString('host')?.trim().toLowerCase()
+      const choices = new Map<number, { name: string, value: number }>()
+
+      for (const monitor of Monitors.get(interaction.guildId)) {
+        const host = monitor.data.host?.trim().toLowerCase()
+        if (selectedHost && host !== selectedHost) continue
+
+        const port = monitor.data.port
+        const labelHost = monitor.data.host
+        if (!choices.has(port)) {
+          choices.set(port, { name: `${labelHost}:${port}`, value: port })
+        }
+      }
+
+      const commonPorts = selectedHost === 'archipelago.gg' || !selectedHost ? [38281] : []
       for (const port of commonPorts) {
         if (!choices.has(port)) {
-          choices.set(port, { name: `archipelago.gg:${port}`, value: port })
+          choices.set(port, { name: `${selectedHost || 'archipelago.gg'}:${port}`, value: port })
         }
       }
 
       if (/^\d+$/.test(typed)) {
         const typedPort = parseInt(typed)
         if (!Number.isNaN(typedPort) && typedPort >= 1 && typedPort <= 65535 && !choices.has(typedPort)) {
-          choices.set(typedPort, { name: `archipelago.gg:${typedPort}`, value: typedPort })
+          choices.set(typedPort, { name: `${selectedHost || 'custom-host'}:${typedPort}`, value: typedPort })
         }
       }
 
@@ -154,10 +185,11 @@ export default class MonitorCommand extends Command {
   }
 
   execute (interaction: ChatInputCommandInteraction) {
+    const host = interaction.options.getString('host', true).trim()
     const game = interaction.options.getString('game')?.trim()
 
     const monitorData: MonitorData = {
-      host: 'archipelago.gg',
+      host,
       port: interaction.options.getInteger('port', true),
       game: game && game.length > 0 ? game : undefined,
       player: interaction.options.getString('player', true).trim(),
@@ -194,7 +226,7 @@ export default class MonitorCommand extends Command {
       .catch(async (err) => {
         console.error('Failed to create monitor:', err)
         await interaction.followUp({
-          content: 'Failed to connect. Check port/player/game.',
+          content: 'Failed to connect. Check host/port/player/game.',
           flags: [MessageFlags.Ephemeral]
         }).catch(console.error)
       })
