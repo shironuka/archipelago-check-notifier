@@ -1,4 +1,4 @@
-# Archipelago Check Notifier - Railway Deployment Guide
+# Archipelago Check Notifier - Railway Deployment Guide 
 
 A Discord bot that monitors Archipelago multiworld randomizer sessions and posts notifications to Discord channels when checks are found. Was updated to be compatible with archipelago.js v2.0.4
 
