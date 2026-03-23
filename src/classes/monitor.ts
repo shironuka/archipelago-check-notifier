@@ -162,17 +162,21 @@ export default class Monitor {
 
   getAllRoomPlayers () {
     const playersManager: any = this.client.players
-    const results: Array<{ name: string, game?: string }> = []
+    const deduped = new Map<string, { name: string, game?: string }>()
 
     const pushPlayer = (player: any) => {
       if (player?.name) {
-        results.push({
-          name: String(player.name),
-          game: player.game != null ? String(player.game) : undefined
-        })
+        const name = String(player.name)
+        if (!deduped.has(name)) {
+          deduped.set(name, {
+            name,
+            game: player.game != null ? String(player.game) : undefined
+          })
+        }
       }
     }
 
+    // Pull whatever the room currently exposes
     if (Array.isArray(playersManager?.slots)) {
       for (const player of playersManager.slots) {
         pushPlayer(player)
@@ -187,19 +191,23 @@ export default class Monitor {
       }
     }
 
-    if (results.length === 0) {
-      for (const tracked of this.getTrackedPlayers()) {
-        results.push({
+    // Always merge in tracked players too, even if they are offline
+    for (const tracked of this.getTrackedPlayers()) {
+      if (!deduped.has(tracked.player)) {
+        deduped.set(tracked.player, {
           name: tracked.player,
           game: tracked.game
         })
       }
     }
 
-    const deduped = new Map<string, { name: string, game?: string }>()
-    for (const player of results) {
-      if (!deduped.has(player.name)) {
-        deduped.set(player.name, player)
+    // Also merge in any players we have known status for, even if not currently
+    // visible in the room metadata and not explicitly tracked
+    for (const playerName of this.knownPlayers) {
+      if (!deduped.has(playerName)) {
+        deduped.set(playerName, {
+          name: playerName
+        })
       }
     }
 
@@ -450,7 +458,8 @@ export default class Monitor {
           selfPlayer.length > 0 &&
           joinedPlayer.trim() === selfPlayer
         ) {
-          this.knownPlayers.add(joinedPlayer.trim())
+          // Ignore the startup/reconnect self-join entirely so the host
+          // stays unknown until we get a real presence update later.
           break
         }
 
