@@ -71,13 +71,10 @@ client.on(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton()) {
-      const isConnectionsButton =
-        interaction.customId.startsWith('connections_prev:') ||
-        interaction.customId.startsWith('connections_next:') ||
-        interaction.customId.startsWith('connections_refresh:') ||
+      const isRemoveButton =
         interaction.customId.startsWith('connections_remove_room:')
 
-      if (isConnectionsButton) {
+      if (isRemoveButton) {
         const member = interaction.member
         const hasAdmin =
           member != null &&
@@ -103,8 +100,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return
         }
 
-        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, currentPage - 1)
+        const page = parseInt(interaction.customId.split(':')[1] ?? '0')
+        const view = buildConnectionsView(interaction.guildId, page + 1)
         await interaction.update(view)
         return
       }
@@ -116,25 +113,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             flags: [MessageFlags.Ephemeral]
           })
           return
-        }
+        }  
 
-      if (interaction.customId.startsWith('connections_refresh:')) {
-        if (!interaction.guildId) {
-          await interaction.reply({
-            content: 'This button can only be used in a server.',
-            flags: [MessageFlags.Ephemeral]
-          })
-          return
-        }
-
-        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, currentPage)
-        await interaction.update(view)
-        return
-      }        
-
-        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, currentPage + 1)
+        const page = parseInt(interaction.customId.split(':')[1] ?? '0')
+        const view = buildConnectionsView(interaction.guildId, page + 1)
         await interaction.update(view)
         return
       }

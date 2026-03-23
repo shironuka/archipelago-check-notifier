@@ -45,20 +45,13 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const safePage = Math.min(Math.max(page, 0), totalPages - 1)
 
   if (total === 0) {
-    const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`connections_refresh:${safePage}`)
-        .setLabel('Refresh')
-        .setStyle(ButtonStyle.Primary)
-    )
-
     return {
       embeds: [
         new EmbedBuilder()
           .setTitle('Connections')
           .setDescription('No active monitors.')
       ],
-      components: [navRow]
+      components: []
     }
   }
 
@@ -68,7 +61,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
     .setDescription(
-      pageItems.map(([roomKey, group], index) => {
+      pageItems.map(([, group], index) => {
         const monitor = group[0]
         const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
@@ -113,10 +106,6 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage <= 0),
     new ButtonBuilder()
-      .setCustomId(`connections_refresh:${safePage}`)
-      .setLabel('Refresh')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
       .setCustomId(`connections_next:${safePage}`)
       .setLabel('Next')
       .setStyle(ButtonStyle.Secondary)
@@ -148,26 +137,5 @@ export default class ConnectionsCommand extends Command {
     }
 
     await interaction.reply(buildConnectionsView(interaction.guildId, 0))
-
-    const message = await interaction.fetchReply()
-
-    let ticks = 0
-    const maxTicks = 6 // 6 * 10s = 60s
-
-    const interval = setInterval(async () => {
-      try {
-        if (ticks >= maxTicks) {
-          clearInterval(interval)
-          return
-        }
-
-        ticks++
-
-        const view = buildConnectionsView(interaction.guildId!, 0)
-        await (message as any).edit(view)
-      } catch (err) {
-        clearInterval(interval)
-      }
-    }, 10000)
   }
 }
