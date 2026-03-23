@@ -7,6 +7,11 @@ import { Connection } from './src/classes/connection'
 const client = new Client({ intents: ['Guilds'] })
 
 client.on(Events.ClientReady, async () => {
+  console.log('DB HOST:', process.env.MYSQLHOST)
+  console.log('DB PORT:', process.env.MYSQLPORT)
+  console.log('DB USER:', process.env.MYSQLUSER)
+  console.log('DB DATABASE:', process.env.MYSQLDATABASE)
+
   try {
     await Database.migrate()
     console.log('Database migrated.')
@@ -21,7 +26,6 @@ client.on(Events.ClientReady, async () => {
     console.error('Command initialization failed:', err)
   }
 
-  // Reconnect to all monitors
   try {
     const connections: Connection[] = await Database.getConnections()
     console.log(`Reconnecting to ${connections.length} monitors...`)
