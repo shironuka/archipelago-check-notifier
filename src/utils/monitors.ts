@@ -6,21 +6,31 @@ import Database from './database'
 
 const monitors: Monitor[] = []
 
+function normalizeGame (game?: string) {
+  return game?.trim() ?? ''
+}
+
+function getMonitorKeyFromData (data: MonitorData) {
+  return `${data.host.trim()}:${data.port}|${data.player.trim()}|${data.channel}|${normalizeGame(data.game)}`
+}
+
+function getMonitorKey (monitor: Monitor) {
+  return getMonitorKeyFromData(monitor.data)
+}
+
 function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   return new Promise<Monitor>((resolve, reject) => {
-    // 🔧 Normalize inputs (VERY IMPORTANT)
     data.host = data.host.trim()
     data.player = data.player.trim()
     data.game = data.game?.trim()
 
     const uri = `${data.host}:${data.port}`
+    const key = getMonitorKeyFromData(data)
 
-    const existing = monitors.find(
-      monitor => `${monitor.data.host}:${monitor.data.port}` === uri
-    )
+    const existing = monitors.find(monitor => getMonitorKey(monitor) === key)
 
     if (existing != null) {
-      console.log(`Already monitoring ${uri}, skipping...`)
+      console.log(`Already monitoring ${key}, skipping...`)
       resolve(existing)
       return
     }
@@ -32,7 +42,6 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       tags: ['Tracker']
     }
 
-    // 🧠 DEBUG LOG (this is the key part)
     console.log('=== LOGIN DEBUG ===')
     console.log({
       uri,
@@ -64,7 +73,6 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
         error: err
       })
       console.error('====================')
-
       reject(err)
     })
   })
@@ -93,12 +101,35 @@ function remove (uri: string, removeFromDb: boolean = true) {
   )
 }
 
+function removeByKey (key: string, removeFromDb: boolean = true) {
+  const monitor = monitors.find((monitor) => getMonitorKey(monitor) === key)
+
+  if (monitor == null) return
+
+  monitors.splice(monitors.indexOf(monitor), 1)
+  monitor.stop()
+
+  if (removeFromDb) {
+    Database.removeConnection(monitor)
+  }
+
+  Database.createLog(
+    monitor.guild.id,
+    '0',
+    `Disconnected from ${monitor.data.host}:${monitor.data.port} (${monitor.data.player})`
+  )
+}
+
 function has (uri: string) {
   return monitors.some(
     (monitor) =>
       monitor.client.uri?.includes(uri) ||
       `${monitor.data.host}:${monitor.data.port}` === uri
   )
+}
+
+function hasKey (key: string) {
+  return monitors.some((monitor) => getMonitorKey(monitor) === key)
 }
 
 function get (guild: string) {
@@ -108,8 +139,12 @@ function get (guild: string) {
 const Monitors = {
   make,
   remove,
+  removeByKey,
   has,
-  get
+  hasKey,
+  get,
+  getMonitorKey,
+  getMonitorKeyFromData
 }
 
 export default Monitors

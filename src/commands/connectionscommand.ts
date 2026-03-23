@@ -11,68 +11,87 @@ import Monitors from '../utils/monitors'
 
 const PAGE_SIZE = 5
 
-function buildConnectionsEmbed (guildId: string, page: number) {
+function getStatus (monitor: any) {
+  if (!monitor.isActive) return '🔴 Stopped'
+  if (monitor.isReconnecting) return '🟡 Reconnecting'
+  return '🟢 Connected'
+}
+
+export function buildConnectionsView (guildId: string, page: number = 0) {
   const monitors = Monitors.get(guildId)
-  const totalPages = Math.max(1, Math.ceil(monitors.length / PAGE_SIZE))
+  const total = monitors.length
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const safePage = Math.min(Math.max(page, 0), totalPages - 1)
+
+  if (total === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle('Connections')
+      .setDescription('No active monitors in this server.')
+
+    return {
+      embeds: [embed],
+      components: []
+    }
+  }
+
   const start = safePage * PAGE_SIZE
   const pageItems = monitors.slice(start, start + PAGE_SIZE)
 
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
-    .setFooter({ text: `Page ${safePage + 1} of ${totalPages}` })
+    .setDescription(
+      pageItems.map((monitor, index) => {
+        const absoluteIndex = start + index + 1
+        const uri = `${monitor.data.host}:${monitor.data.port}`
 
-  if (pageItems.length === 0) {
-    embed.setDescription('No active monitors in this server.')
-    return { embed, components: [], totalPages, page: safePage }
-  }
-
-  embed.setDescription(
-    pageItems.map((m, i) => {
-      const index = start + i + 1
-      const status = m.isActive
-        ? (m.isReconnecting ? 'Reconnecting' : 'Connected')
-        : 'Stopped'
-
-      return [
-        `**#${index}**`,
-        `Host: \`${m.data.host}:${m.data.port}\``,
-        `Player: \`${m.data.player}\``,
-        `Game: \`${m.data.game ?? 'Unknown'}\``,
-        `Channel: <#${m.data.channel}>`,
-        `Status: \`${status}\``
-      ].join('\n')
-    }).join('\n\n')
-  )
-
-  const removeRows = pageItems.map((m, i) => {
-    const index = start + i + 1
-    return new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`connections-remove:${m.data.host}:${m.data.port}`)
-        .setLabel(`Remove #${index}`)
-        .setStyle(ButtonStyle.Danger)
+        return [
+          `**#${absoluteIndex}**`,
+          `Host: \`${uri}\``,
+          `Player: \`${monitor.data.player}\``,
+          `Game: \`${monitor.data.game ?? 'Unknown'}\``,
+          `Channel: <#${monitor.data.channel}>`,
+          `Status: ${getStatus(monitor)}`
+        ].join('\n')
+      }).join('\n\n')
     )
-  })
+    .setFooter({ text: `Page ${safePage + 1} of ${totalPages} • ${total} active monitor${total === 1 ? '' : 's'}` })
+
+  const removeRows: ActionRowBuilder<ButtonBuilder>[] = []
+
+  for (let i = 0; i < pageItems.length; i += 5) {
+    const row = new ActionRowBuilder<ButtonBuilder>()
+
+    for (const [offset, monitor] of pageItems.slice(i, i + 5).entries()) {
+      const localIndex = i + offset
+      const key = Monitors.getMonitorKey(monitor)
+
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`connections_remove:${encodeURIComponent(key)}:${safePage}`)
+          .setLabel(`Remove ${localIndex + 1}`)
+          .setStyle(ButtonStyle.Danger)
+      )
+    }
+
+    removeRows.push(row)
+  }
 
   const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`connections-page:${safePage - 1}`)
-      .setLabel('Previous')
+      .setCustomId(`connections_prev:${safePage}`)
+      .setLabel('Prev')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage <= 0),
     new ButtonBuilder()
-      .setCustomId(`connections-page:${safePage + 1}`)
+      .setCustomId(`connections_next:${safePage}`)
       .setLabel('Next')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage >= totalPages - 1)
   )
 
   return {
-    embed,
-    components: [...removeRows, navRow],
-    totalPages,
-    page: safePage
+    embeds: [embed],
+    components: [...removeRows, navRow]
   }
 }
 
@@ -94,14 +113,11 @@ export default class ConnectionsCommand extends Command {
       return
     }
 
-    const { embed, components } = buildConnectionsEmbed(interaction.guildId, 0)
+    const view = buildConnectionsView(interaction.guildId, 0)
 
     await interaction.reply({
-      embeds: [embed],
-      components,
+      ...view,
       flags: [MessageFlags.Ephemeral]
     })
   }
 }
-
-export { buildConnectionsEmbed }
