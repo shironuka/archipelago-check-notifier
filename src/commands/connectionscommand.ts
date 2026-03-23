@@ -45,13 +45,20 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const safePage = Math.min(Math.max(page, 0), totalPages - 1)
 
   if (total === 0) {
+    const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`connections_refresh:${safePage}`)
+        .setLabel('Refresh')
+        .setStyle(ButtonStyle.Primary)
+    )
+
     return {
       embeds: [
         new EmbedBuilder()
           .setTitle('Connections')
           .setDescription('No active monitors.')
       ],
-      components: []
+      components: [navRow]
     }
   }
 
@@ -61,13 +68,14 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
     .setDescription(
-      pageItems.map(([, group], index) => {
+      pageItems.map(([roomKey, group], index) => {
         const monitor = group[0]
         const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
 
         const roomPlayers = monitor.getAllRoomPlayers()
         const onlineCount = roomPlayers.filter((p: any) => monitor.getPlayerStatus(p.name) === 'online').length
+
         const trackedSet = new Set(monitor.getTrackedPlayers().map((p: any) => p.player))
 
         const playerLines = roomPlayers.map((player: any) => {
@@ -105,6 +113,10 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage <= 0),
     new ButtonBuilder()
+      .setCustomId(`connections_refresh:${safePage}`)
+      .setLabel('Refresh')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId(`connections_next:${safePage}`)
       .setLabel('Next')
       .setStyle(ButtonStyle.Secondary)
@@ -137,7 +149,6 @@ export default class ConnectionsCommand extends Command {
 
     const view = buildConnectionsView(interaction.guildId, 0)
 
-    // Public message so everyone can see it
     await interaction.reply(view)
   }
 }

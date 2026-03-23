@@ -74,6 +74,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const isConnectionsButton =
         interaction.customId.startsWith('connections_prev:') ||
         interaction.customId.startsWith('connections_next:') ||
+        interaction.customId.startsWith('connections_refresh:') ||
         interaction.customId.startsWith('connections_remove_room:')
 
       if (isConnectionsButton) {
@@ -116,6 +117,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
           })
           return
         }
+
+      if (interaction.customId.startsWith('connections_refresh:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
+        const view = buildConnectionsView(interaction.guildId, currentPage)
+        await interaction.update(view)
+        return
+      }        
 
         const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
         const view = buildConnectionsView(interaction.guildId, currentPage + 1)
