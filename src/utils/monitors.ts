@@ -5,6 +5,7 @@ import { Client as DiscordClient } from 'discord.js'
 import Database from './database'
 
 const monitors: Monitor[] = []
+const pendingRoomConnections = new Map<string, Promise<Monitor>>()
 
 function normalizeGame (game?: string) {
   return game?.trim() ?? ''
@@ -19,25 +20,33 @@ function getTrackedKeyFromData (data: MonitorData) {
 }
 
 function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
-  return new Promise<Monitor>((resolve, reject) => {
-    data.host = data.host.trim()
-    data.player = data.player.trim()
-    data.game = data.game?.trim()
+  data.host = data.host.trim()
+  data.player = data.player.trim()
+  data.game = data.game?.trim()
 
-    const uri = `${data.host}:${data.port}`
-    const roomKey = getRoomKeyFromData(data)
+  const uri = `${data.host}:${data.port}`
+  const roomKey = getRoomKeyFromData(data)
 
-    const existing = monitors.find(
-      (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
-    )
+  const existing = monitors.find(
+    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
+  )
 
-    if (existing != null) {
-      existing.addTrackedPlayer(data)
-      console.log(`Added ${data.player} to existing monitor ${uri}`)
-      resolve(existing)
-      return
-    }
+  if (existing != null) {
+    existing.addTrackedPlayer(data)
+    console.log(`Added ${data.player} to existing monitor ${uri}`)
+    return Promise.resolve(existing)
+  }
 
+  const pending = pendingRoomConnections.get(roomKey)
+  if (pending != null) {
+    return pending.then((monitor) => {
+      monitor.addTrackedPlayer(data)
+      console.log(`Added ${data.player} to pending monitor ${uri}`)
+      return monitor
+    })
+  }
+
+  const connectPromise = new Promise<Monitor>((resolve, reject) => {
     const archi = new Client()
 
     const connectionOptions = {
@@ -79,8 +88,13 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       })
       console.error('====================')
       reject(err)
+    }).finally(() => {
+      pendingRoomConnections.delete(roomKey)
     })
   })
+
+  pendingRoomConnections.set(roomKey, connectPromise)
+  return connectPromise
 }
 
 function remove (uri: string, removeFromDb: boolean = true) {
@@ -104,61 +118,25 @@ function remove (uri: string, removeFromDb: boolean = true) {
   )
 }
 
-function removeByTrackedKey (trackedKey: string, removeFromDb: boolean = true) {
-  const monitor = monitors.find((monitor) =>
-    monitor.getTrackedPlayers().some((p: any) => getTrackedKeyFromData({
-      host: monitor.data.host,
-      port: monitor.data.port,
-      channel: monitor.data.channel,
-      player: p.player,
-      game: p.game,
-      mention_join_leave: false,
-      mention_item_finder: false,
-      mention_item_receiver: false,
-      mention_completion: false,
-      mention_hints: false
-    } as MonitorData) === trackedKey)
+function removeByRoomKey (roomKey: string, removeFromDb: boolean = true) {
+  const monitor = monitors.find(
+    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
   )
 
   if (monitor == null) return
 
-  const tracked = monitor.getTrackedPlayers().find((p: any) => getTrackedKeyFromData({
-    host: monitor.data.host,
-    port: monitor.data.port,
-    channel: monitor.data.channel,
-    player: p.player,
-    game: p.game,
-    mention_join_leave: false,
-    mention_item_finder: false,
-    mention_item_receiver: false,
-    mention_completion: false,
-    mention_hints: false
-  } as MonitorData) === trackedKey)
+  monitors.splice(monitors.indexOf(monitor), 1)
+  monitor.stop()
 
-  if (tracked == null) return
-
-  monitor.removeTrackedPlayer(tracked.player)
-
-  if (monitor.getTrackedPlayers().length === 0) {
-    monitors.splice(monitors.indexOf(monitor), 1)
-    monitor.stop()
-
-    if (removeFromDb) {
-      Database.removeConnection(monitor)
-    }
-
-    Database.createLog(
-      monitor.guild.id,
-      '0',
-      `Disconnected from ${monitor.data.host}:${monitor.data.port}`
-    )
-  } else {
-    Database.createLog(
-      monitor.guild.id,
-      '0',
-      `Removed tracked player ${tracked.player} from ${monitor.data.host}:${monitor.data.port}`
-    )
+  if (removeFromDb) {
+    Database.removeConnection(monitor)
   }
+
+  Database.createLog(
+    monitor.guild.id,
+    '0',
+    `Disconnected from ${monitor.data.host}:${monitor.data.port}`
+  )
 }
 
 function has (uri: string) {
@@ -167,20 +145,9 @@ function has (uri: string) {
   )
 }
 
-function hasTrackedKey (trackedKey: string) {
-  return monitors.some((monitor) =>
-    monitor.getTrackedPlayers().some((p: any) => getTrackedKeyFromData({
-      host: monitor.data.host,
-      port: monitor.data.port,
-      channel: monitor.data.channel,
-      player: p.player,
-      game: p.game,
-      mention_join_leave: false,
-      mention_item_finder: false,
-      mention_item_receiver: false,
-      mention_completion: false,
-      mention_hints: false
-    } as MonitorData) === trackedKey)
+function hasRoomKey (roomKey: string) {
+  return monitors.some(
+    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
   )
 }
 
@@ -191,9 +158,9 @@ function get (guild: string) {
 const Monitors = {
   make,
   remove,
-  removeByTrackedKey,
+  removeByRoomKey,
   has,
-  hasTrackedKey,
+  hasRoomKey,
   get,
   getRoomKeyFromData,
   getTrackedKeyFromData

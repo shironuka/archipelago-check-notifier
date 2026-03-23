@@ -22,7 +22,7 @@ function groupByRoom (monitors: any[]) {
     map.get(key)!.push(monitor)
   }
 
-  return Array.from(map.values())
+  return Array.from(map.entries())
 }
 
 function statusLabel (status: string) {
@@ -61,7 +61,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
     .setDescription(
-      pageItems.map((group, index) => {
+      pageItems.map(([roomKey, group], index) => {
         const monitor = group[0]
         const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
@@ -86,39 +86,17 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
     )
     .setFooter({ text: `Page ${safePage + 1} of ${totalPages}` })
 
-  const rows: ActionRowBuilder<ButtonBuilder>[] = []
-
-  for (const group of pageItems) {
+  const roomButtonsRow = new ActionRowBuilder<ButtonBuilder>()
+  for (const [, group] of pageItems) {
     const monitor = group[0]
-    const tracked = monitor.getTrackedPlayers()
+    const roomKey = `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}`
 
-    for (let i = 0; i < tracked.length; i += 5) {
-      const row = new ActionRowBuilder<ButtonBuilder>()
-
-      for (const trackedPlayer of tracked.slice(i, i + 5)) {
-        const key = Monitors.getTrackedKeyFromData({
-          host: monitor.data.host,
-          port: monitor.data.port,
-          channel: monitor.data.channel,
-          player: trackedPlayer.player,
-          game: trackedPlayer.game,
-          mention_join_leave: false,
-          mention_item_finder: false,
-          mention_item_receiver: false,
-          mention_completion: false,
-          mention_hints: false
-        } as any)
-
-        row.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`connections_remove:${encodeURIComponent(key)}:${safePage}`)
-            .setLabel(`❌ ${trackedPlayer.player}`)
-            .setStyle(ButtonStyle.Danger)
-        )
-      }
-
-      rows.push(row)
-    }
+    roomButtonsRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`connections_remove_room:${encodeURIComponent(roomKey)}:${safePage}`)
+        .setLabel(`❌ ${monitor.data.port}`)
+        .setStyle(ButtonStyle.Danger)
+    )
   }
 
   const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -134,11 +112,9 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
       .setDisabled(safePage >= totalPages - 1)
   )
 
-  rows.push(navRow)
-
   return {
     embeds: [embed],
-    components: rows
+    components: [roomButtonsRow, navRow]
   }
 }
 

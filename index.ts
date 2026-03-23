@@ -81,19 +81,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return
       }
 
-      if (interaction.customId.startsWith('connections_remove:')) {
+      if (interaction.customId.startsWith('connections_remove_room:')) {
         if (!interaction.guildId) {
           await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
           return
         }
 
         const parts = interaction.customId.split(':')
-        const encodedKey = parts[1] ?? ''
+        const encodedRoomKey = parts[1] ?? ''
         const page = parseInt(parts[2] ?? '0')
-        const key = decodeURIComponent(encodedKey)
+        const roomKey = decodeURIComponent(encodedRoomKey)
 
-        if (Monitors.hasTrackedKey(key)) {
-          Monitors.removeByTrackedKey(key)
+        if (Monitors.hasRoomKey(roomKey)) {
+          Monitors.removeByRoomKey(roomKey)
         }
 
         const view = buildConnectionsView(interaction.guildId, page)
