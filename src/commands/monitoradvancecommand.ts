@@ -27,8 +27,7 @@ export default class MonitorAdvanceCommand extends Command {
       type: ApplicationCommandOptionType.Integer,
       name: 'port',
       description: 'The port to use',
-      required: true,
-      autocomplete: true
+      required: true
     },
     {
       type: ApplicationCommandOptionType.String,
@@ -38,16 +37,16 @@ export default class MonitorAdvanceCommand extends Command {
       autocomplete: true
     },
     {
-      type: ApplicationCommandOptionType.Channel,
-      channelTypes: [ChannelType.GuildText],
-      name: 'channel',
-      description: 'The channel to send messages to',
-      required: true
-    },
-    {
       type: ApplicationCommandOptionType.String,
       name: 'game',
       description: 'Optional game name',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Channel,
+      channelTypes: [ChannelType.GuildText],
+      name: 'channel',
+      description: 'Optional channel to send messages to. Uses LOG_CHANNEL if omitted.',
       required: false
     },
     {
@@ -116,62 +115,20 @@ export default class MonitorAdvanceCommand extends Command {
       return
     }
 
-    if (focused.name === 'port') {
-      const typed = String(focused.value ?? '').trim()
-      const selectedHost = interaction.options.getString('host')?.trim().toLowerCase()
-      const choices = new Map<number, { name: string, value: number }>()
-
-      for (const monitor of Monitors.get(interaction.guildId)) {
-        const host = monitor.data.host?.trim().toLowerCase()
-        if (selectedHost && host !== selectedHost) continue
-
-        const port = monitor.data.port
-        if (!choices.has(port)) {
-          choices.set(port, {
-            name: `${monitor.data.host}:${port}`,
-            value: port
-          })
-        }
-      }
-
-      const commonPorts = selectedHost === 'archipelago.gg' || !selectedHost ? [38281] : []
-      for (const port of commonPorts) {
-        if (!choices.has(port)) {
-          choices.set(port, {
-            name: `${selectedHost || 'archipelago.gg'}:${port}`,
-            value: port
-          })
-        }
-      }
-
-      if (/^\d+$/.test(typed)) {
-        const typedPort = parseInt(typed)
-        if (!Number.isNaN(typedPort) && typedPort >= 1 && typedPort <= 65535 && !choices.has(typedPort)) {
-          choices.set(typedPort, {
-            name: `${selectedHost || 'custom-host'}:${typedPort}`,
-            value: typedPort
-          })
-        }
-      }
-
-      await interaction.respond(
-        Array.from(choices.values())
-          .filter(choice => typed.length === 0 || String(choice.value).includes(typed))
-          .slice(0, 25)
-      )
-      return
-    }
-
     if (focused.name === 'player') {
       const typed = String(focused.value ?? '').trim().toLowerCase()
       const choices = new Map<string, { name: string, value: string }>()
 
-      const links = await Database.getLinks(interaction.guildId)
-      for (const link of links) {
-        const player = link.archipelago_name?.trim()
-        if (player && !choices.has(player.toLowerCase())) {
-          choices.set(player.toLowerCase(), { name: player, value: player })
+      try {
+        const links = await Database.getLinks(interaction.guildId)
+        for (const link of links) {
+          const player = link.archipelago_name?.trim()
+          if (player && !choices.has(player.toLowerCase())) {
+            choices.set(player.toLowerCase(), { name: player, value: player })
+          }
         }
+      } catch (err) {
+        console.error('Failed to get links for player autocomplete:', err)
       }
 
       for (const monitor of Monitors.get(interaction.guildId)) {
@@ -195,12 +152,23 @@ export default class MonitorAdvanceCommand extends Command {
   execute (interaction: ChatInputCommandInteraction) {
     const host = interaction.options.getString('host', true).trim()
     const game = interaction.options.getString('game')?.trim()
+    const explicitChannel = interaction.options.getChannel('channel')
+    const fallbackChannelId = process.env.LOG_CHANNEL?.trim()
+    const resolvedChannelId = explicitChannel?.id ?? fallbackChannelId
+
+    if (!resolvedChannelId) {
+      void interaction.reply({
+        content: 'No channel was provided and LOG_CHANNEL is not set.',
+        flags: [MessageFlags.Ephemeral]
+      })
+      return
+    }
 
     const monitorData: MonitorData = {
       host,
       port: interaction.options.getInteger('port', true),
       player: interaction.options.getString('player', true).trim(),
-      channel: interaction.options.getChannel('channel', true).id,
+      channel: resolvedChannelId,
       game: game && game.length > 0 ? game : undefined,
       mention_join_leave: interaction.options.getBoolean('mention_join_leave') ?? false,
       mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? true,
@@ -228,7 +196,7 @@ export default class MonitorAdvanceCommand extends Command {
       .then(async (monitor) => {
         monitor.data.id = await Database.makeConnection(monitorData)
         await interaction.followUp({
-          content: `Now monitoring ${uri}.`,
+          content: `Now monitoring ${uri} in <#${resolvedChannelId}>.`,
           flags: [MessageFlags.Ephemeral]
         })
       })
