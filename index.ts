@@ -3,6 +3,7 @@ import Commands from './src/commands'
 import Database from './src/utils/database'
 import Monitors from './src/utils/monitors'
 import { Connection } from './src/classes/connection'
+import { buildConnectionsView } from './src/commands/connectionscommand'
 
 const client = new Client({ intents: ['Guilds'] })
 
@@ -60,6 +61,50 @@ client.on(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith('connections_prev:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          return
+        }
+
+        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
+        const view = buildConnectionsView(interaction.guildId, currentPage - 1)
+        await interaction.update(view)
+        return
+      }
+
+      if (interaction.customId.startsWith('connections_next:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          return
+        }
+
+        const currentPage = parseInt(interaction.customId.split(':')[1] ?? '0')
+        const view = buildConnectionsView(interaction.guildId, currentPage + 1)
+        await interaction.update(view)
+        return
+      }
+
+      if (interaction.customId.startsWith('connections_remove:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          return
+        }
+
+        const parts = interaction.customId.split(':')
+        const encodedUri = parts[1] ?? ''
+        const page = parseInt(parts[2] ?? '0')
+        const uri = decodeURIComponent(encodedUri)
+
+        if (Monitors.has(uri)) {
+          Monitors.remove(uri)
+        }
+
+        const view = buildConnectionsView(interaction.guildId, page)
+        await interaction.update(view)
+        return
+      }
+
       if (interaction.customId.startsWith('remonitor:')) {
         const connectionId = parseInt(interaction.customId.split(':')[1])
         const connection = await Database.getConnection(connectionId)
@@ -98,6 +143,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         interaction.followUp({ content: 'There was an error while executing this command!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
       } else {
         interaction.reply({ content: 'There was an error while executing this command!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+      }
+    } else if (interaction.isButton()) {
+      if (interaction.replied || interaction.deferred) {
+        interaction.followUp({ content: 'There was an error while handling this button!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+      } else {
+        interaction.reply({ content: 'There was an error while handling this button!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
       }
     }
   }

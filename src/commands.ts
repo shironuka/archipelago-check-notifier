@@ -8,6 +8,7 @@ import UnlinkCommand from './commands/unlinkcommand'
 import LinksCommand from './commands/linkscommand'
 import RefreshCommand from './commands/refreshcommand'
 import MonitorAdvanceCommand from './commands/monitoradvancecommand'
+import ConnectionsCommand from './commands/connectionscommand'
 
 let restClient: REST
 
@@ -22,6 +23,7 @@ async function Init (client: Client) {
   commandList.push(new PingCommand(client))
   commandList.push(new MonitorCommand(client))
   commandList.push(new MonitorAdvanceCommand(client))
+  commandList.push(new ConnectionsCommand(client))
   commandList.push(new UnmonitorCommand(client))
   commandList.push(new LinkCommand(client))
   commandList.push(new UnlinkCommand(client))
