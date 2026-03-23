@@ -96,24 +96,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const page = parseInt(parts[2] ?? '0')
         const key = decodeURIComponent(encodedKey)
 
-        let removedMessage = 'That monitor was not found.'
-
-        const monitors = Monitors.get(interaction.guildId)
-        const monitor = monitors.find((m) => Monitors.getMonitorKey(m) === key)
-
-        if (monitor) {
-          removedMessage = `Removed monitor for \`${monitor.data.player}\` on \`${monitor.data.host}:${monitor.data.port}\`.`
-          Monitors.removeByKey(key)
+        if (Monitors.hasTrackedKey(key)) {
+          Monitors.removeByTrackedKey(key)
         }
 
         const view = buildConnectionsView(interaction.guildId, page)
-
-        if (view.embeds?.[0]) {
-          view.embeds[0].setDescription(
-            `${removedMessage}\n\n${view.embeds[0].data.description ?? ''}`
-          )
-        }
-
         await interaction.update(view)
         return
       }

@@ -13,7 +13,6 @@ import {
   HintJSONPacket,
   ItemSendJSONPacket,
   PrintJSONPacket,
-  SlotData,
   itemsHandlingFlags
 } from 'archipelago.js'
 import MonitorData from './monitordata'
@@ -21,7 +20,7 @@ import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
 
 export default class Monitor {
-  client: Client<SlotData>
+  client: Client
   channel: any
   guild: Guild
   data: MonitorData
@@ -30,18 +29,69 @@ export default class Monitor {
   isActive: boolean = true
   reconnectTimeout: any = null
 
-stop () {
-  this.isActive = false
-  if (this.reconnectTimeout) {
-    clearTimeout(this.reconnectTimeout)
-    this.reconnectTimeout = null
+  // Live presence seen by this monitor for the current room
+  onlinePlayers: Set<string> = new Set()
+
+  // Tracked players consolidated under this one room connection
+  trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
+
+  stop () {
+    this.isActive = false
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
+    this.client.socket.disconnect()
   }
-  this.client.socket.disconnect()
-}
 
   queue = {
     hints: [] as string[],
     items: [] as string[]
+  }
+
+  addTrackedPlayer (data: MonitorData) {
+    const player = data.player.trim()
+    if (player.length === 0) return
+
+    this.trackedPlayers.set(player, {
+      player,
+      game: data.game?.trim()
+    })
+  }
+
+  removeTrackedPlayer (player: string) {
+    this.trackedPlayers.delete(player.trim())
+  }
+
+  getTrackedPlayers () {
+    return Array.from(this.trackedPlayers.values())
+  }
+
+  private setPlayerOnlineByName (playerName?: string | null) {
+    if (playerName != null && playerName.trim().length > 0) {
+      this.onlinePlayers.add(playerName.trim())
+    }
+  }
+
+  private setPlayerOfflineByName (playerName?: string | null) {
+    if (playerName != null && playerName.trim().length > 0) {
+      this.onlinePlayers.delete(playerName.trim())
+    }
+  }
+
+  private setPlayerOnlineBySlot (slot: number) {
+    const playerName = this.client.players.findPlayer(slot)?.name
+    this.setPlayerOnlineByName(playerName)
+  }
+
+  private setPlayerOfflineBySlot (slot: number) {
+    const playerName = this.client.players.findPlayer(slot)?.name
+    this.setPlayerOfflineByName(playerName)
+  }
+
+  isPlayerOnline (playerName?: string | null) {
+    if (playerName == null) return false
+    return this.onlinePlayers.has(playerName.trim())
   }
 
   convertData (message: ItemSendJSONPacket | CollectJSONPacket | HintJSONPacket, linkMap: Map<string, any>) {
@@ -173,7 +223,7 @@ stop () {
     this.channel.send({ content, embeds: [embed.data], components }).catch(console.error)
   }
 
-  constructor (client: Client<SlotData>, monitorData: MonitorData, discordClient: DiscordClient) {
+  constructor (client: Client, monitorData: MonitorData, discordClient: DiscordClient) {
     this.client = client
     this.data = monitorData
 
@@ -221,6 +271,7 @@ stop () {
       connectionOptions
     ).then(() => {
       this.isReconnecting = false
+      this.setPlayerOnlineByName(this.data.player)
     }).catch(() => {
       if (!this.isActive) return
       this.reconnectTimeout = setTimeout(() => {
@@ -265,6 +316,8 @@ stop () {
         break
 
       case 'Join':
+        this.setPlayerOnlineBySlot(packet.slot)
+
         if (packet.tags?.includes('Tracker')) {
           this.send(`A tracker for ${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} has joined the game!`)
           return
@@ -274,6 +327,7 @@ stop () {
         break
 
       case 'Part':
+        this.setPlayerOfflineBySlot(packet.slot)
         this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${this.client.players.findPlayer(packet.slot)?.game}) left the game!`)
         break
 

@@ -11,40 +11,30 @@ import Monitors from '../utils/monitors'
 
 const PAGE_SIZE = 5
 
-function groupByConnection (monitors: any[]) {
+function groupByRoom (monitors: any[]) {
   const map = new Map<string, any[]>()
 
   for (const monitor of monitors) {
-    const key = `${monitor.data.host}:${monitor.data.port}`
-
+    const key = `${monitor.data.host}:${monitor.data.port}|${monitor.data.channel}`
     if (!map.has(key)) {
       map.set(key, [])
     }
-
     map.get(key)!.push(monitor)
   }
 
-  return Array.from(map.entries())
+  return Array.from(map.values())
 }
 
-function getPlayerOnlineStatusForGroup (groupMonitors: any[], playerName: string) {
-  let sawAnySignal = false
-
-  for (const monitor of groupMonitors) {
-    if (typeof monitor.isPlayerOnline === 'function') {
-      sawAnySignal = true
-      if (monitor.isPlayerOnline(playerName)) {
-        return '🟢 Online'
-      }
-    }
+function getPlayerStatus (monitor: any, playerName: string) {
+  if (typeof monitor.isPlayerOnline === 'function') {
+    return monitor.isPlayerOnline(playerName) ? '🟢 Online' : '🔴 Offline'
   }
-
-  return sawAnySignal ? '🔴 Offline' : '⚪ Unknown'
+  return '⚪ Unknown'
 }
 
 export function buildConnectionsView (guildId: string, page: number = 0) {
   const monitors = Monitors.get(guildId)
-  const grouped = groupByConnection(monitors)
+  const grouped = groupByRoom(monitors)
 
   const total = grouped.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -67,19 +57,23 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
     .setDescription(
-      pageItems.map(([uri, groupMonitors], index) => {
+      pageItems.map((group, index) => {
+        const monitor = group[0]
+        const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
 
-        const playerLines = groupMonitors.map(monitor => {
-          const playerName = monitor.data.player
-          const status = getPlayerOnlineStatusForGroup(groupMonitors, playerName)
-          return `• \`${playerName}\` — ${status}`
+        const tracked = monitor.getTrackedPlayers()
+        const onlineCount = tracked.filter((p: any) => monitor.isPlayerOnline(p.player)).length
+
+        const playerLines = tracked.map((p: any) => {
+          return `• \`${p.player}\` — ${getPlayerStatus(monitor, p.player)}`
         }).join('\n')
 
         return [
           `**#${absoluteIndex} — \`${uri}\`**`,
+          `Summary: **${onlineCount}/${tracked.length} online**`,
           `Player Status:\n${playerLines}`,
-          `Channel: <#${groupMonitors[0].data.channel}>`
+          `Channel: <#${monitor.data.channel}>`
         ].join('\n')
       }).join('\n\n')
     )
@@ -87,17 +81,31 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = []
 
-  for (const [, groupMonitors] of pageItems) {
-    for (let i = 0; i < groupMonitors.length; i += 5) {
+  for (const group of pageItems) {
+    const monitor = group[0]
+    const tracked = monitor.getTrackedPlayers()
+
+    for (let i = 0; i < tracked.length; i += 5) {
       const row = new ActionRowBuilder<ButtonBuilder>()
 
-      for (const monitor of groupMonitors.slice(i, i + 5)) {
-        const key = Monitors.getMonitorKey(monitor)
+      for (const trackedPlayer of tracked.slice(i, i + 5)) {
+        const key = Monitors.getTrackedKeyFromData({
+          host: monitor.data.host,
+          port: monitor.data.port,
+          channel: monitor.data.channel,
+          player: trackedPlayer.player,
+          game: trackedPlayer.game,
+          mention_join_leave: false,
+          mention_item_finder: false,
+          mention_item_receiver: false,
+          mention_completion: false,
+          mention_hints: false
+        } as any)
 
         row.addComponents(
           new ButtonBuilder()
             .setCustomId(`connections_remove:${encodeURIComponent(key)}:${safePage}`)
-            .setLabel(`❌ ${monitor.data.player}`)
+            .setLabel(`❌ ${trackedPlayer.player}`)
             .setStyle(ButtonStyle.Danger)
         )
       }
