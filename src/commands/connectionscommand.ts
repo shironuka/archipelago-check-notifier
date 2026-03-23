@@ -25,11 +25,15 @@ function groupByRoom (monitors: any[]) {
   return Array.from(map.values())
 }
 
-function getPlayerStatus (monitor: any, playerName: string) {
-  if (typeof monitor.isPlayerOnline === 'function') {
-    return monitor.isPlayerOnline(playerName) ? '🟢 Online' : '🔴 Offline'
+function statusLabel (status: string) {
+  switch (status) {
+    case 'online':
+      return '🟢 Online'
+    case 'offline':
+      return '🔴 Offline'
+    default:
+      return '⚪ Unknown'
   }
-  return '⚪ Unknown'
 }
 
 export function buildConnectionsView (guildId: string, page: number = 0) {
@@ -62,16 +66,19 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
         const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
 
-        const tracked = monitor.getTrackedPlayers()
-        const onlineCount = tracked.filter((p: any) => monitor.isPlayerOnline(p.player)).length
+        const roomPlayers = monitor.getAllRoomPlayers()
+        const onlineCount = roomPlayers.filter((p: any) => monitor.getPlayerStatus(p.name) === 'online').length
 
-        const playerLines = tracked.map((p: any) => {
-          return `• \`${p.player}\` — ${getPlayerStatus(monitor, p.player)}`
+        const trackedSet = new Set(monitor.getTrackedPlayers().map((p: any) => p.player))
+
+        const playerLines = roomPlayers.map((player: any) => {
+          const trackedMarker = trackedSet.has(player.name) ? '📌 ' : ''
+          return `• ${trackedMarker}\`${player.name}\` — ${statusLabel(monitor.getPlayerStatus(player.name))}`
         }).join('\n')
 
         return [
           `**#${absoluteIndex} — \`${uri}\`**`,
-          `Summary: **${onlineCount}/${tracked.length} online**`,
+          `Summary: **${onlineCount}/${roomPlayers.length} online**`,
           `Player Status:\n${playerLines}`,
           `Channel: <#${monitor.data.channel}>`
         ].join('\n')

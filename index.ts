@@ -31,10 +31,6 @@ client.on(Events.ClientReady, async () => {
     const connections: Connection[] = await Database.getConnections()
     console.log(`Reconnecting to ${connections.length} monitors...`)
     for (const result of connections) {
-      if (Monitors.has(`${result.host}:${result.port}`)) {
-        console.log(`Already monitoring ${result.host}:${result.port}, skipping...`)
-        continue
-      }
       Monitors.make(result, client).catch(err => {
         console.error(`Failed to reconnect to monitor ${result.host}:${result.port}:`, err)
         const channel = client.channels.cache.get(result.channel)

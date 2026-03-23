@@ -29,8 +29,11 @@ export default class Monitor {
   isActive: boolean = true
   reconnectTimeout: any = null
 
-  // Live presence seen by this monitor for the current room
+  // Players currently seen as online from live Join/Part events
   onlinePlayers: Set<string> = new Set()
+
+  // Players we've seen status for at least once
+  knownPlayers: Set<string> = new Set()
 
   // Tracked players consolidated under this one room connection
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
@@ -69,13 +72,17 @@ export default class Monitor {
 
   private setPlayerOnlineByName (playerName?: string | null) {
     if (playerName != null && playerName.trim().length > 0) {
-      this.onlinePlayers.add(playerName.trim())
+      const name = playerName.trim()
+      this.knownPlayers.add(name)
+      this.onlinePlayers.add(name)
     }
   }
 
   private setPlayerOfflineByName (playerName?: string | null) {
     if (playerName != null && playerName.trim().length > 0) {
-      this.onlinePlayers.delete(playerName.trim())
+      const name = playerName.trim()
+      this.knownPlayers.add(name)
+      this.onlinePlayers.delete(name)
     }
   }
 
@@ -89,9 +96,66 @@ export default class Monitor {
     this.setPlayerOfflineByName(playerName)
   }
 
+  getPlayerStatus (playerName?: string | null) {
+    if (playerName == null || playerName.trim().length === 0) return 'unknown'
+
+    const name = playerName.trim()
+
+    if (this.onlinePlayers.has(name)) return 'online'
+    if (this.knownPlayers.has(name)) return 'offline'
+
+    return 'unknown'
+  }
+
   isPlayerOnline (playerName?: string | null) {
-    if (playerName == null) return false
-    return this.onlinePlayers.has(playerName.trim())
+    return this.getPlayerStatus(playerName) === 'online'
+  }
+
+  getAllRoomPlayers () {
+    const playersManager: any = this.client.players
+    const results: Array<{ name: string, game?: string }> = []
+
+    const pushPlayer = (player: any) => {
+      if (player?.name) {
+        results.push({
+          name: String(player.name),
+          game: player.game != null ? String(player.game) : undefined
+        })
+      }
+    }
+
+    if (Array.isArray(playersManager?.slots)) {
+      for (const player of playersManager.slots) {
+        pushPlayer(player)
+      }
+    } else if (playersManager?.slots instanceof Map) {
+      for (const [, player] of playersManager.slots) {
+        pushPlayer(player)
+      }
+    } else if (playersManager?.slots && typeof playersManager.slots === 'object') {
+      for (const key of Object.keys(playersManager.slots)) {
+        pushPlayer(playersManager.slots[key])
+      }
+    }
+
+    // Fallback: at least show tracked players if slots are unavailable
+    if (results.length === 0) {
+      for (const tracked of this.getTrackedPlayers()) {
+        results.push({
+          name: tracked.player,
+          game: tracked.game
+        })
+      }
+    }
+
+    const deduped = new Map<string, { name: string, game?: string }>()
+    for (const player of results) {
+      if (!deduped.has(player.name)) {
+        deduped.set(player.name, player)
+      }
+    }
+
+    return Array.from(deduped.values())
   }
 
   convertData (message: ItemSendJSONPacket | CollectJSONPacket | HintJSONPacket, linkMap: Map<string, any>) {
@@ -271,7 +335,8 @@ export default class Monitor {
       connectionOptions
     ).then(() => {
       this.isReconnecting = false
-      this.setPlayerOnlineByName(this.data.player)
+      // Intentionally do NOT force the login slot online here.
+      // We only trust Join/Part packets for live status.
     }).catch(() => {
       if (!this.isActive) return
       this.reconnectTimeout = setTimeout(() => {
