@@ -30,11 +30,18 @@ export default class Monitor {
   reconnectTimeout: NodeJS.Timeout | null = null
   reconnectAttempts: number = 0
 
+  // suppress join/part spam briefly after startup/reconnect
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
 
+  // during startup/reconnect, do not let the authenticated slot auto-mark itself online
+  ignoreSelfJoinDuringSuppressWindow: boolean = true
+
+  // preserve last-known room presence across reconnects in the same process
   onlinePlayers: Set<string> = new Set()
   knownPlayers: Set<string> = new Set()
+
+  // consolidated tracked players for this room connection
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
 
   queue = {
@@ -82,10 +89,7 @@ export default class Monitor {
 
     this.reconnectAttempts += 1
 
-    const delay =
-      this.reconnectAttempts <= 1
-        ? 10000
-        : 30000
+    const delay = this.reconnectAttempts <= 1 ? 10000 : 30000
 
     console.log(
       `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${delay / 1000}s (attempt ${this.reconnectAttempts})`
@@ -435,7 +439,21 @@ export default class Monitor {
         this.addQueue(this.convertData(packet, linkMap), 'hints')
         break
 
-      case 'Join':
+      case 'Join': {
+        const joinedPlayer = this.client.players.findPlayer(packet.slot)?.name
+        const selfPlayer = this.data.player?.trim()
+
+        if (
+          this.suppressPresenceMessages &&
+          this.ignoreSelfJoinDuringSuppressWindow &&
+          joinedPlayer != null &&
+          selfPlayer.length > 0 &&
+          joinedPlayer.trim() === selfPlayer
+        ) {
+          this.knownPlayers.add(joinedPlayer.trim())
+          break
+        }
+
         this.setPlayerOnlineBySlot(packet.slot)
 
         if (this.suppressPresenceMessages) {
@@ -449,6 +467,7 @@ export default class Monitor {
 
         this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${this.client.players.findPlayer(packet.slot)?.game}) joined the game!`)
         break
+      }
 
       case 'Part':
         this.setPlayerOfflineBySlot(packet.slot)
