@@ -28,18 +28,13 @@ export default class Monitor {
   isReconnecting: boolean = false
   isActive: boolean = true
   reconnectTimeout: NodeJS.Timeout | null = null
+  reconnectAttempts: number = 0
 
-  // Suppress join/part spam briefly after startup/reconnect
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
 
-  // Players currently seen as online from live Join/Part events
   onlinePlayers: Set<string> = new Set()
-
-  // Players we've seen status for at least once
   knownPlayers: Set<string> = new Set()
-
-  // Tracked players consolidated under this one room connection
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
 
   queue = {
@@ -49,6 +44,7 @@ export default class Monitor {
 
   stop () {
     this.isActive = false
+    this.isReconnecting = false
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout)
@@ -60,7 +56,11 @@ export default class Monitor {
       this.suppressPresenceTimeout = null
     }
 
-    this.client.socket.disconnect()
+    try {
+      this.client.socket.disconnect()
+    } catch (err) {
+      console.error('Error while disconnecting monitor socket:', err)
+    }
   }
 
   private startPresenceSuppressWindow () {
@@ -74,6 +74,27 @@ export default class Monitor {
       this.suppressPresenceMessages = false
       this.suppressPresenceTimeout = null
     }, 8000)
+  }
+
+  private scheduleReconnect () {
+    if (!this.isActive) return
+    if (this.reconnectTimeout) return
+
+    this.reconnectAttempts += 1
+
+    const delay =
+      this.reconnectAttempts <= 1
+        ? 10000
+        : 30000
+
+    console.log(
+      `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${delay / 1000}s (attempt ${this.reconnectAttempts})`
+    )
+
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null
+      void this.reconnect()
+    }, delay)
   }
 
   addTrackedPlayer (data: MonitorData) {
@@ -330,7 +351,9 @@ export default class Monitor {
   }
 
   onDisconnect () {
-    if (!this.isActive || this.isReconnecting) return
+    if (!this.isActive) return
+    if (this.isReconnecting) return
+
     this.isReconnecting = true
 
     const row = new ActionRowBuilder<ButtonBuilder>()
@@ -342,32 +365,40 @@ export default class Monitor {
       )
 
     this.send('Disconnected from the server.', [row])
-    this.reconnect()
+    this.scheduleReconnect()
   }
 
-  reconnect () {
+  async reconnect () {
     if (!this.isActive) return
+
+    this.isReconnecting = true
 
     const connectionOptions = {
       items: itemsHandlingFlags.all,
       tags: ['Tracker']
     }
 
-    this.client.login(
-      `${this.data.host}:${this.data.port}`,
-      this.data.player,
-      this.data.game,
-      connectionOptions
-    ).then(() => {
+    console.log(
+      `Attempting reconnect to ${this.data.host}:${this.data.port} as ${this.data.player} (attempt ${this.reconnectAttempts + 1})`
+    )
+
+    try {
+      await this.client.login(
+        `${this.data.host}:${this.data.port}`,
+        this.data.player,
+        this.data.game,
+        connectionOptions
+      )
+
       this.isReconnecting = false
+      this.reconnectAttempts = 0
       this.startPresenceSuppressWindow()
-    }).catch(() => {
-      if (!this.isActive) return
-      this.reconnectTimeout = setTimeout(() => {
-        this.reconnectTimeout = null
-        this.reconnect()
-      }, 300000)
-    })
+
+      console.log(`Reconnect successful for ${this.data.host}:${this.data.port}`)
+    } catch (err) {
+      console.error(`Reconnect failed for ${this.data.host}:${this.data.port}:`, err)
+      this.scheduleReconnect()
+    }
   }
 
   async onJSON (packet: PrintJSONPacket) {
