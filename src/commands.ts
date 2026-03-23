@@ -21,12 +21,12 @@ async function Init (client: Client) {
 
   commandList.push(new PingCommand(client))
   commandList.push(new MonitorCommand(client))
+  commandList.push(new MonitorAdvanceCommand(client))
   commandList.push(new UnmonitorCommand(client))
   commandList.push(new LinkCommand(client))
   commandList.push(new UnlinkCommand(client))
   commandList.push(new LinksCommand(client))
   commandList.push(new RefreshCommand(client))
-  commandList.push(new MonitorAdvanceCommand(client))
 
   if (client.token == null || client.application == null) return
 
@@ -40,12 +40,20 @@ async function Init (client: Client) {
       Routes.applicationGuildCommands(client.application.id, process.env.GUILD_ID),
       { body: [...commands, ...debugCommands] }
     )
-  }
+    console.log('Registered guild commands')
 
-  await restClient.put(
-    Routes.applicationCommands(client.application.id),
-    { body: commands }
-  )
+    await restClient.put(
+      Routes.applicationCommands(client.application.id),
+      { body: [] }
+    )
+    console.log('Cleared global commands')
+  } else {
+    await restClient.put(
+      Routes.applicationCommands(client.application.id),
+      { body: commands }
+    )
+    console.log('Registered global commands')
+  }
 }
 
 function GetCommands () {
