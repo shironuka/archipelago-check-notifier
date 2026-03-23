@@ -147,8 +147,27 @@ export default class ConnectionsCommand extends Command {
       return
     }
 
-    const view = buildConnectionsView(interaction.guildId, 0)
+    await interaction.reply(buildConnectionsView(interaction.guildId, 0))
 
-    await interaction.reply(view)
+    const message = await interaction.fetchReply()
+
+    let ticks = 0
+    const maxTicks = 6 // 6 * 10s = 60s
+
+    const interval = setInterval(async () => {
+      try {
+        if (ticks >= maxTicks) {
+          clearInterval(interval)
+          return
+        }
+
+        ticks++
+
+        const view = buildConnectionsView(interaction.guildId!, 0)
+        await (message as any).edit(view)
+      } catch (err) {
+        clearInterval(interval)
+      }
+    }, 10000)
   }
 }
