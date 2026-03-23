@@ -17,6 +17,20 @@ async function migrate (): Promise<void> {
   await pool.query('CREATE TABLE IF NOT EXISTS activity_log (id INT AUTO_INCREMENT PRIMARY KEY, guild_id VARCHAR(255), user_id VARCHAR(255), action VARCHAR(255), timestamp DATETIME)')
   await pool.query('CREATE TABLE IF NOT EXISTS user_links (id INT AUTO_INCREMENT PRIMARY KEY, guild_id VARCHAR(255), archipelago_name VARCHAR(255), discord_id VARCHAR(255), UNIQUE KEY (guild_id, archipelago_name))')
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS presence_status (
+      room_key VARCHAR(255) NOT NULL,
+      host VARCHAR(255) NOT NULL,
+      port INT NOT NULL,
+      channel VARCHAR(255) NOT NULL,
+      player_name VARCHAR(255) NOT NULL,
+      game VARCHAR(255) NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'unknown',
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (room_key, player_name)
+    )
+  `)
+
   // Migration for 1.3.0 - Add mention flags
   const [columns]: any = await pool.query('SHOW COLUMNS FROM connections')
   const columnNames = columns.map((c: any) => c.Field)
@@ -136,13 +150,63 @@ async function getConnection (id: number): Promise<Connection | null> {
 }
 
 async function makeConnection (data: MonitorData): Promise<number> {
-  const [result]: any = await pool.query('INSERT INTO connections (host, port, game, player, channel, mention_join_leave, mention_item_finder, mention_item_receiver, mention_completion, mention_hints) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [data.host, data.port, data.game, data.player, data.channel, data.mention_join_leave, data.mention_item_finder, data.mention_item_receiver, data.mention_completion, data.mention_hints])
+  const [result]: any = await pool.query(
+    'INSERT INTO connections (host, port, game, player, channel, mention_join_leave, mention_item_finder, mention_item_receiver, mention_completion, mention_hints) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      data.host,
+      data.port,
+      data.game,
+      data.player,
+      data.channel,
+      data.mention_join_leave,
+      data.mention_item_finder,
+      data.mention_item_receiver,
+      data.mention_completion,
+      data.mention_hints
+    ]
+  )
   return result.insertId
 }
 
 async function removeConnection (monitor: Monitor) {
-  await pool.query('DELETE FROM connections WHERE host = ? AND port = ? AND game = ? AND player = ? AND channel = ?', [monitor.data.host, monitor.data.port, monitor.data.game, monitor.data.player, monitor.channel.id])
+  await pool.query(
+    'DELETE FROM connections WHERE host = ? AND port = ? AND game = ? AND player = ? AND channel = ?',
+    [monitor.data.host, monitor.data.port, monitor.data.game, monitor.data.player, monitor.channel.id]
+  )
+}
+
+async function upsertPresence (
+  roomKey: string,
+  host: string,
+  port: number,
+  channel: string,
+  playerName: string,
+  game: string | undefined,
+  status: 'online' | 'offline' | 'unknown'
+) {
+  await pool.query(
+    `INSERT INTO presence_status (room_key, host, port, channel, player_name, game, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       game = VALUES(game),
+       status = VALUES(status),
+       updated_at = CURRENT_TIMESTAMP`,
+    [roomKey, host, port, channel, playerName, game ?? null, status]
+  )
+}
+
+async function getPresenceForRoom (roomKey: string): Promise<any[]> {
+  const [rows] = await pool.query(
+    `SELECT room_key, host, port, channel, player_name, game, status, updated_at
+     FROM presence_status
+     WHERE room_key = ?`,
+    [roomKey]
+  )
+  return rows as any[]
+}
+
+async function deletePresenceForRoom (roomKey: string) {
+  await pool.query('DELETE FROM presence_status WHERE room_key = ?', [roomKey])
 }
 
 const Database = {
@@ -154,7 +218,10 @@ const Database = {
   migrate,
   linkUser,
   unlinkUser,
-  getLinks
+  getLinks,
+  upsertPresence,
+  getPresenceForRoom,
+  deletePresenceForRoom
 }
 
 export default Database

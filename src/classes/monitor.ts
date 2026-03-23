@@ -19,6 +19,8 @@ import MonitorData from './monitordata'
 import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
 
+type PresenceState = 'online' | 'offline' | 'unknown'
+
 export default class Monitor {
   client: Client
   channel: any
@@ -30,23 +32,73 @@ export default class Monitor {
   reconnectTimeout: NodeJS.Timeout | null = null
   reconnectAttempts: number = 0
 
-  // suppress join/part spam briefly after startup/reconnect
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
 
-  // during startup/reconnect, do not let the authenticated slot auto-mark itself online
   ignoreSelfJoinDuringSuppressWindow: boolean = true
 
-  // preserve last-known room presence across reconnects in the same process
   onlinePlayers: Set<string> = new Set()
   knownPlayers: Set<string> = new Set()
 
-  // consolidated tracked players for this room connection
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
+
+  dbPresence: Map<string, { status: PresenceState, game?: string }> = new Map()
 
   queue = {
     hints: [] as string[],
     items: [] as string[]
+  }
+
+  private getRoomKey () {
+    return `${this.data.host}:${this.data.port}|${this.data.channel}`
+  }
+
+  private async loadPresenceFromDb () {
+    try {
+      const rows = await Database.getPresenceForRoom(this.getRoomKey())
+
+      this.dbPresence.clear()
+
+      for (const row of rows) {
+        const name = String(row.player_name)
+        const status = String(row.status) as PresenceState
+        const game = row.game != null ? String(row.game) : undefined
+
+        this.dbPresence.set(name, { status, game })
+
+        if (status === 'online') {
+          this.knownPlayers.add(name)
+          this.onlinePlayers.add(name)
+        } else if (status === 'offline') {
+          this.knownPlayers.add(name)
+          this.onlinePlayers.delete(name)
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to load presence for room ${this.getRoomKey()}:`, err)
+    }
+  }
+
+  private async savePresence (
+    playerName: string,
+    status: PresenceState,
+    game?: string
+  ) {
+    try {
+      await Database.upsertPresence(
+        this.getRoomKey(),
+        this.data.host,
+        this.data.port,
+        this.data.channel,
+        playerName,
+        game,
+        status
+      )
+
+      this.dbPresence.set(playerName, { status, game })
+    } catch (err) {
+      console.error(`Failed to save presence for ${playerName} in ${this.getRoomKey()}:`, err)
+    }
   }
 
   stop () {
@@ -109,6 +161,8 @@ export default class Monitor {
       player,
       game: data.game?.trim()
     })
+
+    void this.savePresence(player, 'unknown', data.game?.trim())
   }
 
   removeTrackedPlayer (player: string) {
@@ -135,14 +189,24 @@ export default class Monitor {
     }
   }
 
-  private setPlayerOnlineBySlot (slot: number) {
-    const playerName = this.client.players.findPlayer(slot)?.name
+  private async setPlayerOnlineBySlot (slot: number) {
+    const player = this.client.players.findPlayer(slot)
+    const playerName = player?.name
     this.setPlayerOnlineByName(playerName)
+
+    if (playerName != null) {
+      await this.savePresence(playerName, 'online', player?.game)
+    }
   }
 
-  private setPlayerOfflineBySlot (slot: number) {
-    const playerName = this.client.players.findPlayer(slot)?.name
+  private async setPlayerOfflineBySlot (slot: number) {
+    const player = this.client.players.findPlayer(slot)
+    const playerName = player?.name
     this.setPlayerOfflineByName(playerName)
+
+    if (playerName != null) {
+      await this.savePresence(playerName, 'offline', player?.game)
+    }
   }
 
   getPlayerStatus (playerName?: string | null) {
@@ -153,7 +217,7 @@ export default class Monitor {
     if (this.onlinePlayers.has(name)) return 'online'
     if (this.knownPlayers.has(name)) return 'offline'
 
-    return 'unknown'
+    return this.dbPresence.get(name)?.status ?? 'unknown'
   }
 
   isPlayerOnline (playerName?: string | null) {
@@ -176,7 +240,6 @@ export default class Monitor {
       }
     }
 
-    // Pull whatever the room currently exposes
     if (Array.isArray(playersManager?.slots)) {
       for (const player of playersManager.slots) {
         pushPlayer(player)
@@ -191,7 +254,6 @@ export default class Monitor {
       }
     }
 
-    // Always merge in tracked players too, even if they are offline
     for (const tracked of this.getTrackedPlayers()) {
       if (!deduped.has(tracked.player)) {
         deduped.set(tracked.player, {
@@ -201,8 +263,15 @@ export default class Monitor {
       }
     }
 
-    // Also merge in any players we have known status for, even if not currently
-    // visible in the room metadata and not explicitly tracked
+    for (const [playerName, presence] of this.dbPresence.entries()) {
+      if (!deduped.has(playerName)) {
+        deduped.set(playerName, {
+          name: playerName,
+          game: presence.game
+        })
+      }
+    }
+
     for (const playerName of this.knownPlayers) {
       if (!deduped.has(playerName)) {
         deduped.set(playerName, {
@@ -356,6 +425,7 @@ export default class Monitor {
     this.guild = channel.guild
 
     this.startPresenceSuppressWindow()
+    void this.loadPresenceFromDb()
 
     this.client.socket.on('connectionRefused', this.onDisconnect.bind(this))
     this.client.socket.on('disconnected', this.onDisconnect.bind(this))
@@ -405,6 +475,7 @@ export default class Monitor {
       this.isReconnecting = false
       this.reconnectAttempts = 0
       this.startPresenceSuppressWindow()
+      await this.loadPresenceFromDb()
 
       console.log(`Reconnect successful for ${this.data.host}:${this.data.port}`)
     } catch (err) {
@@ -449,6 +520,7 @@ export default class Monitor {
 
       case 'Join': {
         const joinedPlayer = this.client.players.findPlayer(packet.slot)?.name
+        const joinedGame = this.client.players.findPlayer(packet.slot)?.game
         const selfPlayer = this.data.player?.trim()
 
         if (
@@ -458,12 +530,10 @@ export default class Monitor {
           selfPlayer.length > 0 &&
           joinedPlayer.trim() === selfPlayer
         ) {
-          // Ignore the startup/reconnect self-join entirely so the host
-          // stays unknown until we get a real presence update later.
           break
         }
 
-        this.setPlayerOnlineBySlot(packet.slot)
+        await this.setPlayerOnlineBySlot(packet.slot)
 
         if (this.suppressPresenceMessages) {
           break
@@ -474,19 +544,21 @@ export default class Monitor {
           return
         }
 
-        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${this.client.players.findPlayer(packet.slot)?.game}) joined the game!`)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${joinedGame}) joined the game!`)
         break
       }
 
-      case 'Part':
-        this.setPlayerOfflineBySlot(packet.slot)
+      case 'Part': {
+        const leftGame = this.client.players.findPlayer(packet.slot)?.game
+        await this.setPlayerOfflineBySlot(packet.slot)
 
         if (this.suppressPresenceMessages) {
           break
         }
 
-        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${this.client.players.findPlayer(packet.slot)?.game}) left the game!`)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${leftGame}) left the game!`)
         break
+      }
 
       case 'Goal':
         this.send(`${formatPlayer(packet.slot, this.data.mention_completion, 'mention_completion')} has completed their goal!`)
