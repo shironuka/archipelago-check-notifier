@@ -27,7 +27,11 @@ export default class Monitor {
 
   isReconnecting: boolean = false
   isActive: boolean = true
-  reconnectTimeout: any = null
+  reconnectTimeout: NodeJS.Timeout | null = null
+
+  // Suppress join/part spam briefly after startup/reconnect
+  suppressPresenceMessages: boolean = true
+  suppressPresenceTimeout: NodeJS.Timeout | null = null
 
   // Players currently seen as online from live Join/Part events
   onlinePlayers: Set<string> = new Set()
@@ -38,18 +42,38 @@ export default class Monitor {
   // Tracked players consolidated under this one room connection
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
 
+  queue = {
+    hints: [] as string[],
+    items: [] as string[]
+  }
+
   stop () {
     this.isActive = false
+
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout)
       this.reconnectTimeout = null
     }
+
+    if (this.suppressPresenceTimeout) {
+      clearTimeout(this.suppressPresenceTimeout)
+      this.suppressPresenceTimeout = null
+    }
+
     this.client.socket.disconnect()
   }
 
-  queue = {
-    hints: [] as string[],
-    items: [] as string[]
+  private startPresenceSuppressWindow () {
+    this.suppressPresenceMessages = true
+
+    if (this.suppressPresenceTimeout) {
+      clearTimeout(this.suppressPresenceTimeout)
+    }
+
+    this.suppressPresenceTimeout = setTimeout(() => {
+      this.suppressPresenceMessages = false
+      this.suppressPresenceTimeout = null
+    }, 8000)
   }
 
   addTrackedPlayer (data: MonitorData) {
@@ -138,7 +162,6 @@ export default class Monitor {
       }
     }
 
-    // Fallback: at least show tracked players if slots are unavailable
     if (results.length === 0) {
       for (const tracked of this.getTrackedPlayers()) {
         results.push({
@@ -299,6 +322,8 @@ export default class Monitor {
     this.channel = channel
     this.guild = channel.guild
 
+    this.startPresenceSuppressWindow()
+
     this.client.socket.on('connectionRefused', this.onDisconnect.bind(this))
     this.client.socket.on('disconnected', this.onDisconnect.bind(this))
     this.client.socket.on('printJSON', this.onJSON.bind(this))
@@ -335,8 +360,7 @@ export default class Monitor {
       connectionOptions
     ).then(() => {
       this.isReconnecting = false
-      // Intentionally do NOT force the login slot online here.
-      // We only trust Join/Part packets for live status.
+      this.startPresenceSuppressWindow()
     }).catch(() => {
       if (!this.isActive) return
       this.reconnectTimeout = setTimeout(() => {
@@ -383,6 +407,10 @@ export default class Monitor {
       case 'Join':
         this.setPlayerOnlineBySlot(packet.slot)
 
+        if (this.suppressPresenceMessages) {
+          break
+        }
+
         if (packet.tags?.includes('Tracker')) {
           this.send(`A tracker for ${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} has joined the game!`)
           return
@@ -393,6 +421,11 @@ export default class Monitor {
 
       case 'Part':
         this.setPlayerOfflineBySlot(packet.slot)
+
+        if (this.suppressPresenceMessages) {
+          break
+        }
+
         this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${this.client.players.findPlayer(packet.slot)?.game}) left the game!`)
         break
 
