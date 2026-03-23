@@ -61,14 +61,13 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const embed = new EmbedBuilder()
     .setTitle('Active Connections')
     .setDescription(
-      pageItems.map(([roomKey, group], index) => {
+      pageItems.map(([, group], index) => {
         const monitor = group[0]
         const uri = `${monitor.data.host}:${monitor.data.port}`
         const absoluteIndex = start + index + 1
 
         const roomPlayers = monitor.getAllRoomPlayers()
         const onlineCount = roomPlayers.filter((p: any) => monitor.getPlayerStatus(p.name) === 'online').length
-
         const trackedSet = new Set(monitor.getTrackedPlayers().map((p: any) => p.player))
 
         const playerLines = roomPlayers.map((player: any) => {
@@ -138,9 +137,7 @@ export default class ConnectionsCommand extends Command {
 
     const view = buildConnectionsView(interaction.guildId, 0)
 
-    await interaction.reply({
-      ...view,
-      flags: [MessageFlags.Ephemeral]
-    })
+    // Public message so everyone can see it
+    await interaction.reply(view)
   }
 }

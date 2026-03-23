@@ -1,4 +1,14 @@
-import { Client, Events, InteractionType, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js'
+import {
+  Client,
+  Events,
+  InteractionType,
+  MessageFlags,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  PermissionsBitField
+} from 'discord.js'
 import Commands from './src/commands'
 import Database from './src/utils/database'
 import Monitors from './src/utils/monitors'
@@ -30,14 +40,17 @@ client.on(Events.ClientReady, async () => {
   try {
     const connections: Connection[] = await Database.getConnections()
     console.log(`Reconnecting to ${connections.length} monitors...`)
+
     for (const result of connections) {
       Monitors.make(result, client).catch(err => {
         console.error(`Failed to reconnect to monitor ${result.host}:${result.port}:`, err)
+
         const channel = client.channels.cache.get(result.channel)
         if (channel?.isTextBased()) {
           const embed = new EmbedBuilder()
             .setTitle('Archipelago')
             .setDescription(`Failed to reconnect to monitor ${result.host}:${result.port} on startup.`)
+
           const row = new ActionRowBuilder<ButtonBuilder>()
             .addComponents(
               new ButtonBuilder()
@@ -45,6 +58,7 @@ client.on(Events.ClientReady, async () => {
                 .setLabel('Re-monitor')
                 .setStyle(ButtonStyle.Primary)
             )
+
           ;(channel as any).send({ embeds: [embed], components: [row] }).catch(console.error)
         }
       })
@@ -57,9 +71,34 @@ client.on(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton()) {
+      const isConnectionsButton =
+        interaction.customId.startsWith('connections_prev:') ||
+        interaction.customId.startsWith('connections_next:') ||
+        interaction.customId.startsWith('connections_remove_room:')
+
+      if (isConnectionsButton) {
+        const member = interaction.member
+        const hasAdmin =
+          member != null &&
+          'permissions' in member &&
+          member.permissions instanceof PermissionsBitField &&
+          member.permissions.has(PermissionsBitField.Flags.ManageGuild)
+
+        if (!hasAdmin) {
+          await interaction.reply({
+            content: 'You do not have permission to manage connections.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+      }
+
       if (interaction.customId.startsWith('connections_prev:')) {
         if (!interaction.guildId) {
-          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
           return
         }
 
@@ -71,7 +110,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith('connections_next:')) {
         if (!interaction.guildId) {
-          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
           return
         }
 
@@ -83,7 +125,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith('connections_remove_room:')) {
         if (!interaction.guildId) {
-          await interaction.reply({ content: 'This button can only be used in a server.', flags: [MessageFlags.Ephemeral] })
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
           return
         }
 
@@ -104,8 +149,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('remonitor:')) {
         const connectionId = parseInt(interaction.customId.split(':')[1])
         const connection = await Database.getConnection(connectionId)
+
         if (!connection) {
-          return interaction.reply({ content: 'Monitor configuration not found in database.', flags: [MessageFlags.Ephemeral] })
+          await interaction.reply({
+            content: 'Monitor configuration not found in database.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
         }
 
         if (Monitors.has(`${connection.host}:${connection.port}`)) {
@@ -113,13 +163,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] })
+
         Monitors.make(connection, client).then(() => {
-          interaction.editReply({ content: `Now monitoring Archipelago on ${connection.host}:${connection.port}.` })
+          interaction.editReply({
+            content: `Now monitoring Archipelago on ${connection.host}:${connection.port}.`
+          })
         }).catch(err => {
           console.error('Failed to create monitor:', err)
-          interaction.editReply({ content: 'Failed to connect to Archipelago. Please check if the server is up.' })
+          interaction.editReply({
+            content: 'Failed to connect to Archipelago. Please check if the server is up.'
+          })
         })
+
+        return
       }
+
       return
     }
 
@@ -127,24 +185,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case InteractionType.ApplicationCommandAutocomplete:
         Commands.Autocomplete(interaction)
         break
+
       case InteractionType.ApplicationCommand:
         Commands.Execute(interaction)
-        await Database.createLog(interaction.guildId || '0', interaction.user.id, `Executed command ${interaction.commandName}`)
+        await Database.createLog(
+          interaction.guildId || '0',
+          interaction.user.id,
+          `Executed command ${interaction.commandName}`
+        )
         break
     }
   } catch (err) {
     console.error('Interaction error:', err)
+
     if (interaction.type === InteractionType.ApplicationCommand) {
       if (interaction.replied || interaction.deferred) {
-        interaction.followUp({ content: 'There was an error while executing this command!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+        interaction.followUp({
+          content: 'There was an error while executing this command!',
+          flags: [MessageFlags.Ephemeral]
+        }).catch(() => {})
       } else {
-        interaction.reply({ content: 'There was an error while executing this command!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+        interaction.reply({
+          content: 'There was an error while executing this command!',
+          flags: [MessageFlags.Ephemeral]
+        }).catch(() => {})
       }
     } else if (interaction.isButton()) {
       if (interaction.replied || interaction.deferred) {
-        interaction.followUp({ content: 'There was an error while handling this button!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+        interaction.followUp({
+          content: 'There was an error while handling this button!',
+          flags: [MessageFlags.Ephemeral]
+        }).catch(() => {})
       } else {
-        interaction.reply({ content: 'There was an error while handling this button!', flags: [MessageFlags.Ephemeral] }).catch(() => {})
+        interaction.reply({
+          content: 'There was an error while handling this button!',
+          flags: [MessageFlags.Ephemeral]
+        }).catch(() => {})
       }
     }
   }
