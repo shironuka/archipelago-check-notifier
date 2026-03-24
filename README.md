@@ -133,12 +133,16 @@ In Railway, go to your bot service and add these variables:
 
 Once deployed, the bot provides these slash commands:
 
-- `/monitor` - Start monitoring an Archipelago session. Supports optional flags to configure mentions:
+- `/monitor` - Start monitoring an Archipelago session with specified port and player. Uses archipelago.gg as the host by default. Supports optional flags to configure mentions:
+    - `game` - Optional game name
+    - `channel` - Optinal channel to send messages to. Uses LOG_CHANNEL if omitted.
     - `mention_join_leave` - @ for join/leave (default: false)
-    - `mention_item_finder` - @ for finding items (default: true)
+    - `mention_item_finder` - @ for finding items (default: false)
     - `mention_item_receiver` - @ for receiving items (default: true)
     - `mention_completion` - @ for finishing goal (default: true)
     - `mention_hints` - @ for hints (default: true)
+    - `embedded_color` - Optional embed color in hex, like FF0000 or 00FFAA
+-`/monitor-advance` - Start monitoring an Archipelago session with specified host, port and player. Supports same optional flags from `/monitor`
 - `/unmonitor` - Stop monitoring a session
 - `/link` - Link an Archipelago player name to a Discord user. Supports optional flags to override monitor defaults for that user:
     - `mention_join_leave` - @ you for join/leave (default: false)
@@ -149,6 +153,7 @@ Once deployed, the bot provides these slash commands:
 - `/unlink` - Remove a link
 - `/links` - Show all links in the server
 - `/refresh` - Disconnect and reconnect an Archipelago monitor.
+- `/connections` - Shows active Archipelago connections. Provides option to unmonitor as well.
 
 ---
 

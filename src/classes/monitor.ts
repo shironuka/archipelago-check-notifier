@@ -20,6 +20,12 @@ import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
 
 type PresenceState = 'online' | 'offline' | 'unknown'
+type QueuedMessage = {
+  message: string,
+  color?: number
+}
+
+const DEFAULT_EMBED_COLOR = 0x0099FF
 
 export default class Monitor {
   client: Client
@@ -45,8 +51,8 @@ export default class Monitor {
   dbPresence: Map<string, { status: PresenceState, game?: string }> = new Map()
 
   queue = {
-    hints: [] as string[],
-    items: [] as string[]
+    hints: [] as QueuedMessage[],
+    items: [] as QueuedMessage[]
   }
 
   private getRoomKey () {
@@ -55,6 +61,54 @@ export default class Monitor {
 
   private getRoomLabel () {
     return `${this.data.host}:${this.data.port}`
+  }
+
+  private parseEmbedColor (raw?: string | null): number | undefined {
+    if (!raw) return undefined
+    const normalized = raw.replace(/^#/, '').trim()
+    if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) return undefined
+    return parseInt(normalized, 16)
+  }
+
+  private getPlayerEmbedColor (playerName: string | undefined, linkMap: Map<string, any>): number {
+    if (!playerName) return DEFAULT_EMBED_COLOR
+    const link = linkMap.get(playerName)
+    const parsed = this.parseEmbedColor(link?.embed_color)
+    return parsed ?? DEFAULT_EMBED_COLOR
+  }
+
+  private getFirstLinkedColorFromPacket (
+    packet: ItemSendJSONPacket | CollectJSONPacket | HintJSONPacket,
+    linkMap: Map<string, any>
+  ): number {
+    for (const slot of packet.data) {
+      if (slot.type === 'player_id') {
+        const playerId = parseInt(slot.text)
+        const playerName = this.client.players.findPlayer(playerId)?.name
+        const color = this.getPlayerEmbedColor(playerName, linkMap)
+        if (color !== DEFAULT_EMBED_COLOR || linkMap.has(playerName)) {
+          return color
+        }
+      }
+    }
+    return DEFAULT_EMBED_COLOR
+  }
+
+  private buildEmbed (
+    title: string,
+    description?: string,
+    color: number = DEFAULT_EMBED_COLOR
+  ) {
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setColor(color)
+      .setFooter({ text: this.getRoomLabel() })
+
+    if (description != null) {
+      embed.setDescription(description)
+    }
+
+    return embed
   }
 
   private async loadPresenceFromDb () {
@@ -144,7 +198,6 @@ export default class Monitor {
     if (this.reconnectTimeout) return
 
     this.reconnectAttempts += 1
-
     const delay = this.reconnectAttempts <= 1 ? 10000 : 30000
 
     console.log(
@@ -278,9 +331,7 @@ export default class Monitor {
 
     for (const playerName of this.knownPlayers) {
       if (!deduped.has(playerName)) {
-        deduped.set(playerName, {
-          name: playerName
-        })
+        deduped.set(playerName, { name: playerName })
       }
     }
 
@@ -330,25 +381,28 @@ export default class Monitor {
     }).join(' ')
   }
 
-  addQueue (message: string, type: 'hints' | 'items' = 'hints') {
+  addQueue (message: string, type: 'hints' | 'items' = 'hints', color?: number) {
     if (this.queue.hints.length === 0 && this.queue.items.length === 0) {
       setTimeout(() => this.sendQueue(), 150)
     }
 
+    const queued: QueuedMessage = { message, color }
+
     switch (type) {
       case 'hints':
-        this.queue.hints.push(message)
+        this.queue.hints.push(queued)
         break
       case 'items':
-        this.queue.items.push(message)
+        this.queue.items.push(queued)
         break
     }
   }
 
   sendQueue () {
-    const hints = this.queue.hints.map((message, index) => ({
+    const hints = this.queue.hints.map((entry, index) => ({
       name: `${this.getRoomLabel()} • Hint #${index + 1}`,
-      value: message
+      value: entry.message,
+      color: entry.color
     }))
     this.queue.hints = []
 
@@ -368,18 +422,19 @@ export default class Monitor {
         ? Array.from(mentions).map(id => `<@${id}>`).join(' ')
         : undefined
 
-      const embed = new EmbedBuilder()
-        .setTitle(`Archipelago • ${this.getRoomLabel()}`)
-        .addFields(batch)
-        .setFooter({ text: this.getRoomLabel() })
-        .data
+      const embed = this.buildEmbed(
+        `Archipelago • ${this.getRoomLabel()}`,
+        undefined,
+        batch[0]?.color ?? DEFAULT_EMBED_COLOR
+      ).addFields(batch.map(({ name, value }) => ({ name, value }))).data
 
       this.channel.send({ content, embeds: [embed] }).catch(console.error)
     }
 
-    const items = this.queue.items.map((message, index) => ({
+    const items = this.queue.items.map((entry, index) => ({
       name: `${this.getRoomLabel()} • Item #${index + 1}`,
-      value: message
+      value: entry.message,
+      color: entry.color
     }))
     this.queue.items = []
 
@@ -399,21 +454,22 @@ export default class Monitor {
         ? Array.from(mentions).map(id => `<@${id}>`).join(' ')
         : undefined
 
-      const embed = new EmbedBuilder()
-        .setTitle(`Archipelago • ${this.getRoomLabel()}`)
-        .addFields(batch)
-        .setFooter({ text: this.getRoomLabel() })
-        .data
+      const embed = this.buildEmbed(
+        `Archipelago • ${this.getRoomLabel()}`,
+        undefined,
+        batch[0]?.color ?? DEFAULT_EMBED_COLOR
+      ).addFields(batch.map(({ name, value }) => ({ name, value }))).data
 
       this.channel.send({ content, embeds: [embed] }).catch(console.error)
     }
   }
 
-  send (message: string, components?: any[]) {
-    const embed = new EmbedBuilder()
-      .setDescription(message)
-      .setTitle(`Archipelago • ${this.getRoomLabel()}`)
-      .setFooter({ text: this.getRoomLabel() })
+  send (message: string, components?: any[], color: number = DEFAULT_EMBED_COLOR) {
+    const embed = this.buildEmbed(
+      `Archipelago • ${this.getRoomLabel()}`,
+      message,
+      color
+    )
 
     const mentions = new Set<string>()
     const regex = /<@(\d+)>/g
@@ -463,7 +519,7 @@ export default class Monitor {
           .setStyle(ButtonStyle.Primary)
       )
 
-    this.send('Disconnected from the server.', [row])
+    this.send('Disconnected from the server.', [row], 0xFFAA00)
     this.scheduleReconnect()
   }
 
@@ -528,11 +584,19 @@ export default class Monitor {
     switch (packet.type) {
       case 'Collect':
       case 'ItemSend':
-        this.addQueue(this.convertData(packet, linkMap), 'items')
+        this.addQueue(
+          this.convertData(packet, linkMap),
+          'items',
+          this.getFirstLinkedColorFromPacket(packet, linkMap)
+        )
         break
 
       case 'Hint':
-        this.addQueue(this.convertData(packet, linkMap), 'hints')
+        this.addQueue(
+          this.convertData(packet, linkMap),
+          'hints',
+          this.getFirstLinkedColorFromPacket(packet, linkMap)
+        )
         break
 
       case 'Join': {
@@ -556,16 +620,19 @@ export default class Monitor {
           break
         }
 
+        const color = this.getPlayerEmbedColor(joinedPlayer, linkMap)
+
         if (packet.tags?.includes('Tracker')) {
-          this.send(`A tracker for ${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} has joined the game!`)
+          this.send(`A tracker for ${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} has joined the game!`, undefined, color)
           return
         }
 
-        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${joinedGame}) joined the game!`)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${joinedGame}) joined the game!`, undefined, color)
         break
       }
 
       case 'Part': {
+        const leftPlayer = this.client.players.findPlayer(packet.slot)?.name
         const leftGame = this.client.players.findPlayer(packet.slot)?.game
         await this.setPlayerOfflineBySlot(packet.slot)
 
@@ -573,17 +640,24 @@ export default class Monitor {
           break
         }
 
-        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${leftGame}) left the game!`)
+        const color = this.getPlayerEmbedColor(leftPlayer, linkMap)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_join_leave, 'mention_join_leave')} (${leftGame}) left the game!`, undefined, color)
         break
       }
 
-      case 'Goal':
-        this.send(`${formatPlayer(packet.slot, this.data.mention_completion, 'mention_completion')} has completed their goal!`)
+      case 'Goal': {
+        const playerName = this.client.players.findPlayer(packet.slot)?.name
+        const color = this.getPlayerEmbedColor(playerName, linkMap)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_completion, 'mention_completion')} has completed their goal!`, undefined, color)
         break
+      }
 
-      case 'Release':
-        this.send(`${formatPlayer(packet.slot, this.data.mention_item_finder, 'mention_item_finder')} has released their remaining items!`)
+      case 'Release': {
+        const playerName = this.client.players.findPlayer(packet.slot)?.name
+        const color = this.getPlayerEmbedColor(playerName, linkMap)
+        this.send(`${formatPlayer(packet.slot, this.data.mention_item_finder, 'mention_item_finder')} has released their remaining items!`, undefined, color)
         break
+      }
     }
   }
 }

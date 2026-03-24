@@ -39,7 +39,7 @@ export default class LinkCommand extends Command {
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_item_finder',
-      description: 'Whether to @ you when you find an item (default: true)',
+      description: 'Whether to @ you when you find an item (default: false)',
       required: false
     },
     {
