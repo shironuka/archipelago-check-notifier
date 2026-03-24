@@ -3,6 +3,7 @@ import {
   ActionRowBuilder,
   ApplicationCommandOption,
   ApplicationCommandOptionType,
+  AutocompleteInteraction,
   ButtonBuilder,
   ButtonStyle,
   ChatInputCommandInteraction,
@@ -21,8 +22,8 @@ function parseHexColor (raw?: string | null): number | null {
   return parseInt(normalized, 16)
 }
 
-function boolIcon (value: boolean) {
-  return value ? '✅' : '❌'
+function boolDot (value: boolean) {
+  return value ? '🟢' : '🔴'
 }
 
 function normalizeLinks (links: any[]) {
@@ -88,23 +89,22 @@ export function buildLinksView (
 
   const embed = new EmbedBuilder()
     .setTitle(title)
-    .setDescription('Current player-to-user mappings and notification preferences.')
+    .setDescription('Player mappings and notification settings.')
     .setColor(firstValidColor)
     .setFooter({ text: `Page ${safePage + 1} of ${totalPages} • ${total} link${total === 1 ? '' : 's'}` })
 
   for (const link of pageItems) {
-    const colorText = link.embed_color ? `#${String(link.embed_color).replace(/^#/, '').toUpperCase()}` : 'Default'
+    const colorText = link.embed_color
+      ? `#${String(link.embed_color).replace(/^#/, '').toUpperCase()}`
+      : 'Default'
 
     embed.addFields({
       name: `${link.archipelago_name}`,
       value: [
-        `User: <@${link.discord_id}>`,
-        `Embed Color: \`${colorText}\``,
-        `Join/Leave: ${boolIcon(link.mention_join_leave)}`,
-        `Item Finder: ${boolIcon(link.mention_item_finder)}`,
-        `Item Receiver: ${boolIcon(link.mention_item_receiver)}`,
-        `Completion: ${boolIcon(link.mention_completion)}`,
-        `Hints: ${boolIcon(link.mention_hints)}`
+        `**User:** <@${link.discord_id}>`,
+        `**Embed:** \`${colorText}\``,
+        `**Flags:** ${boolDot(link.mention_join_leave)} Join/Leave  ${boolDot(link.mention_item_finder)} Finder  ${boolDot(link.mention_item_receiver)} Receiver`,
+        `**More:** ${boolDot(link.mention_completion)} Completion  ${boolDot(link.mention_hints)} Hints`
       ].join('\n'),
       inline: false
     })
@@ -147,13 +147,54 @@ export default class LinksCommand extends Command {
       type: ApplicationCommandOptionType.String,
       name: 'player',
       description: 'Optional player filter',
-      required: false
+      required: false,
+      autocomplete: true
     }
   ]
 
   constructor (client: any) {
     super()
     this.client = client
+  }
+
+  async autocomplete (interaction: AutocompleteInteraction) {
+    if (!interaction.guildId) {
+      await interaction.respond([])
+      return
+    }
+
+    const focused = interaction.options.getFocused(true)
+
+    if (focused.name !== 'player') {
+      await interaction.respond([])
+      return
+    }
+
+    try {
+      const links = await Database.getLinks(interaction.guildId)
+      const query = String(focused.value ?? '').trim().toLowerCase()
+
+      const uniquePlayers = Array.from(
+        new Set(
+          links
+            .map((link: any) => String(link.archipelago_name).trim())
+            .filter((name: string) => name.length > 0)
+        )
+      )
+
+      const matches = uniquePlayers
+        .filter(name => query.length === 0 || name.toLowerCase().includes(query))
+        .slice(0, 25)
+        .map(name => ({
+          name,
+          value: name
+        }))
+
+      await interaction.respond(matches)
+    } catch (err) {
+      console.error('Failed to autocomplete links player option:', err)
+      await interaction.respond([])
+    }
   }
 
   async execute (interaction: ChatInputCommandInteraction) {
@@ -171,10 +212,7 @@ export default class LinksCommand extends Command {
       const links = await Database.getLinks(interaction.guildId)
       const view = buildLinksView(interaction.guildId, links, 0, user?.id, player)
 
-      await interaction.reply({
-        ...view,
-        flags: [MessageFlags.Ephemeral]
-      })
+      await interaction.reply(view)
     } catch (err) {
       console.error('Failed to get links:', err)
       await interaction.reply({
