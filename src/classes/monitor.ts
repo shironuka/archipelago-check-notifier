@@ -505,21 +505,13 @@ export default class Monitor {
     this.client.socket.on('printJSON', this.onJSON.bind(this))
   }
 
-  onDisconnect () {
+onDisconnect () {
     if (!this.isActive) return
     if (this.isReconnecting) return
 
     this.isReconnecting = true
 
-    const row = new ActionRowBuilder<ButtonBuilder>()
-      .addComponents(
-        new ButtonBuilder()
-          .setCustomId(`remonitor:${this.data.id}`)
-          .setLabel('Re-monitor')
-          .setStyle(ButtonStyle.Primary)
-      )
-
-    this.send('Disconnected from the server.', [row], 0xFFAA00)
+    console.warn(`Disconnected from ${this.data.host}:${this.data.port}; scheduling reconnect.`)
     this.scheduleReconnect()
   }
 
