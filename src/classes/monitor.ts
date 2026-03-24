@@ -550,6 +550,12 @@ export default class Monitor {
       this.startPresenceSuppressWindow()
       await this.loadPresenceFromDb()
 
+      // Trust the authenticated tracker slot after a successful reconnect.
+      // This fixes stale "offline" status when the player was already online
+      // before the bot reconnected and no fresh Join packet is emitted.
+      this.setPlayerOnlineByName(this.data.player)
+      await this.savePresence(this.data.player, 'online', this.data.game)
+
       console.log(`Reconnect successful for ${this.data.host}:${this.data.port}`)
     } catch (err) {
       console.error(`Reconnect failed for ${this.data.host}:${this.data.port}:`, err)
