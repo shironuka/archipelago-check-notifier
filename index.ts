@@ -14,6 +14,7 @@ import Database from './src/utils/database'
 import Monitors from './src/utils/monitors'
 import { Connection } from './src/classes/connection'
 import { buildConnectionsView } from './src/commands/connectionscommand'
+import { buildLinksView } from './src/commands/linkscommand'
 
 const client = new Client({ intents: ['Guilds'] })
 
@@ -71,10 +72,10 @@ client.on(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton()) {
-      const isRemoveButton =
+      const isRemoveConnectionButton =
         interaction.customId.startsWith('connections_remove_room:')
 
-      if (isRemoveButton) {
+      if (isRemoveConnectionButton) {
         const member = interaction.member
         const hasAdmin =
           member != null &&
@@ -101,7 +102,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const page = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, page + 1)
+        const view = buildConnectionsView(interaction.guildId, page - 1)
         await interaction.update(view)
         return
       }
@@ -113,7 +114,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             flags: [MessageFlags.Ephemeral]
           })
           return
-        }  
+        }
 
         const page = parseInt(interaction.customId.split(':')[1] ?? '0')
         const view = buildConnectionsView(interaction.guildId, page + 1)
@@ -140,6 +141,52 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const view = buildConnectionsView(interaction.guildId, page)
+        await interaction.update(view)
+        return
+      }
+
+      if (interaction.customId.startsWith('links_prev:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        const parts = interaction.customId.split(':')
+        const currentPage = parseInt(parts[1] ?? '0')
+        const userKey = parts[2] ?? 'all'
+        const playerKey = parts[3] ?? 'all'
+
+        const userId = userKey === 'all' ? undefined : userKey
+        const playerFilter = playerKey === 'all' ? undefined : decodeURIComponent(playerKey)
+
+        const links = await Database.getLinks(interaction.guildId)
+        const view = buildLinksView(interaction.guildId, links, currentPage - 1, userId, playerFilter)
+        await interaction.update(view)
+        return
+      }
+
+      if (interaction.customId.startsWith('links_next:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        const parts = interaction.customId.split(':')
+        const currentPage = parseInt(parts[1] ?? '0')
+        const userKey = parts[2] ?? 'all'
+        const playerKey = parts[3] ?? 'all'
+
+        const userId = userKey === 'all' ? undefined : userKey
+        const playerFilter = playerKey === 'all' ? undefined : decodeURIComponent(playerKey)
+
+        const links = await Database.getLinks(interaction.guildId)
+        const view = buildLinksView(interaction.guildId, links, currentPage + 1, userId, playerFilter)
         await interaction.update(view)
         return
       }
