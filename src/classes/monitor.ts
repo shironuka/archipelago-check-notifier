@@ -53,6 +53,10 @@ export default class Monitor {
     return `${this.data.host}:${this.data.port}|${this.data.channel}`
   }
 
+  private getRoomLabel () {
+    return `${this.data.host}:${this.data.port}`
+  }
+
   private async loadPresenceFromDb () {
     try {
       const rows = await Database.getPresenceForRoom(this.getRoomKey())
@@ -343,7 +347,7 @@ export default class Monitor {
 
   sendQueue () {
     const hints = this.queue.hints.map((message, index) => ({
-      name: `#${index + 1}`,
+      name: `${this.getRoomLabel()} • Hint #${index + 1}`,
       value: message
     }))
     this.queue.hints = []
@@ -364,12 +368,17 @@ export default class Monitor {
         ? Array.from(mentions).map(id => `<@${id}>`).join(' ')
         : undefined
 
-      const embed = new EmbedBuilder().setTitle('Hints').addFields(batch).data
+      const embed = new EmbedBuilder()
+        .setTitle(`Archipelago • ${this.getRoomLabel()}`)
+        .addFields(batch)
+        .setFooter({ text: this.getRoomLabel() })
+        .data
+
       this.channel.send({ content, embeds: [embed] }).catch(console.error)
     }
 
     const items = this.queue.items.map((message, index) => ({
-      name: `#${index + 1}`,
+      name: `${this.getRoomLabel()} • Item #${index + 1}`,
       value: message
     }))
     this.queue.items = []
@@ -390,13 +399,21 @@ export default class Monitor {
         ? Array.from(mentions).map(id => `<@${id}>`).join(' ')
         : undefined
 
-      const embed = new EmbedBuilder().setTitle('Items').addFields(batch).data
+      const embed = new EmbedBuilder()
+        .setTitle(`Archipelago • ${this.getRoomLabel()}`)
+        .addFields(batch)
+        .setFooter({ text: this.getRoomLabel() })
+        .data
+
       this.channel.send({ content, embeds: [embed] }).catch(console.error)
     }
   }
 
   send (message: string, components?: any[]) {
-    const embed = new EmbedBuilder().setDescription(message).setTitle('Archipelago')
+    const embed = new EmbedBuilder()
+      .setDescription(message)
+      .setTitle(`Archipelago • ${this.getRoomLabel()}`)
+      .setFooter({ text: this.getRoomLabel() })
 
     const mentions = new Set<string>()
     const regex = /<@(\d+)>/g
