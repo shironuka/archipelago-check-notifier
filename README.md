@@ -151,7 +151,9 @@ Once deployed, the bot provides these slash commands:
     - `mention_completion` - @ you for finishing goal (default: true)
     - `mention_hints` - @ you for hints (default: true)
 - `/unlink` - Remove a link
-- `/links` - Show all links in the server
+- `/links` - Show all links in the server. Supports optional flags:
+    - `user` - Discord user to show only their linked players
+    - `player` - Player filter
 - `/refresh` - Disconnect and reconnect an Archipelago monitor.
 - `/connections` - Shows active Archipelago connections. Provides option to unmonitor as well.
 
