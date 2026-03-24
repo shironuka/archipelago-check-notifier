@@ -97,7 +97,7 @@ export default class LinkCommand extends Command {
 
     const flags = {
       mention_join_leave: interaction.options.getBoolean('mention_join_leave') ?? false,
-      mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? true,
+      mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? false,
       mention_item_receiver: interaction.options.getBoolean('mention_item_receiver') ?? true,
       mention_completion: interaction.options.getBoolean('mention_completion') ?? true,
       mention_hints: interaction.options.getBoolean('mention_hints') ?? true
