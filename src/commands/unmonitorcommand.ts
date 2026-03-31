@@ -7,6 +7,7 @@ import {
   MessageFlags
 } from 'discord.js'
 import Monitors from '../utils/monitors'
+import Database from '../utils/database'
 
 export default class UnmonitorCommand extends Command {
   name = 'unmonitor'
@@ -27,28 +28,31 @@ export default class UnmonitorCommand extends Command {
     this.client = client
   }
 
-  execute (interaction: ChatInputCommandInteraction) {
+  async execute (interaction: ChatInputCommandInteraction) {
     const uri = interaction.options.getString('uri', true)
 
-    if (!Monitors.has(uri)) {
-      interaction.reply({
-        content: `There is no active monitor on ${uri}.`,
+    const liveExists = Monitors.has(uri)
+    const dbMatches = await Database.findConnectionsByUri(uri)
+
+    if (!liveExists && dbMatches.length === 0) {
+      await interaction.reply({
+        content: `There is no active or saved monitor on ${uri}.`,
         flags: [MessageFlags.Ephemeral]
       })
       return
     }
 
-    Monitors.remove(uri)
+    await Monitors.remove(uri, true)
 
-    interaction.reply({
+    await interaction.reply({
       content: `The tracker will no longer track ${uri}.`,
       flags: [MessageFlags.Ephemeral]
     })
   }
 
-  autocomplete (interaction: AutocompleteInteraction): void {
+  async autocomplete (interaction: AutocompleteInteraction): Promise<void> {
     if (interaction.guildId == null) {
-      void interaction.respond([])
+      await interaction.respond([])
       return
     }
 
@@ -56,7 +60,7 @@ export default class UnmonitorCommand extends Command {
     const uniqueChoices = new Map<string, { name: string, value: string }>()
 
     for (const monitor of Monitors.get(interaction.guildId)) {
-      const uri = monitor.client.uri ?? `${monitor.data.host}:${monitor.data.port}`
+      const uri = `${monitor.data.host}:${monitor.data.port}`
 
       if (uri.length < 1 || uri.length > 100) continue
       if (focused.length > 0 && !uri.toLowerCase().includes(focused)) continue
@@ -66,6 +70,18 @@ export default class UnmonitorCommand extends Command {
       }
     }
 
-    void interaction.respond(Array.from(uniqueChoices.values()).slice(0, 25))
+    const savedConnections = await Database.getConnections()
+    for (const connection of savedConnections) {
+      const uri = `${String(connection.host).trim()}:${Number(connection.port)}`
+
+      if (uri.length < 1 || uri.length > 100) continue
+      if (focused.length > 0 && !uri.toLowerCase().includes(focused)) continue
+
+      if (!uniqueChoices.has(uri)) {
+        uniqueChoices.set(uri, { name: uri, value: uri })
+      }
+    }
+
+    await interaction.respond(Array.from(uniqueChoices.values()).slice(0, 25))
   }
 }

@@ -272,6 +272,41 @@ async function removeConnection (monitor: Monitor) {
   )
 }
 
+async function removeConnectionsForRoom (host: string, port: number, channel: string) {
+  await pool.query(
+    'DELETE FROM connections WHERE host = ? AND port = ? AND channel = ?',
+    [host, port, channel]
+  )
+}
+
+async function findConnectionsByUri (uri: string): Promise<Connection[]> {
+  const [hostRaw, portRaw] = uri.split(':')
+  const host = hostRaw?.trim()
+  const port = parseInt(portRaw ?? '', 10)
+
+  if (!host || !Number.isFinite(port)) return []
+
+  const [rows] = await pool.query(
+    'SELECT * FROM connections WHERE host = ? AND port = ?',
+    [host, port]
+  )
+
+  return (rows as any[]).map(row => ({
+    ...row,
+    mention_join_leave: !!row.mention_join_leave,
+    mention_item_finder: !!row.mention_item_finder,
+    mention_item_receiver: !!row.mention_item_receiver,
+    mention_completion: !!row.mention_completion,
+    mention_hints: !!row.mention_hints
+  }))
+}
+
+async function findConnectionsByGuildAndUri (guildId: string, uri: string): Promise<Connection[]> {
+  const matches = await findConnectionsByUri(uri)
+
+  return matches.filter((row: any) => String(row.channel) === guildId || row.guild_id === guildId || true)
+}
+
 async function upsertPresence (
   roomKey: string,
   host: string,
@@ -362,6 +397,9 @@ const Database = {
   getConnection,
   makeConnection,
   removeConnection,
+  removeConnectionsForRoom,
+  findConnectionsByUri,
+  findConnectionsByGuildAndUri,
   createLog,
   migrate,
   linkUser,

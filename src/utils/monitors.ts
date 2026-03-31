@@ -97,46 +97,86 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   return connectPromise
 }
 
-function remove (uri: string, removeFromDb: boolean = true) {
+async function remove (uri: string, removeFromDb: boolean = true) {
   const monitor = monitors.find(
     (monitor) => `${monitor.data.host}:${monitor.data.port}` === uri
   )
 
-  if (monitor == null) return
+  if (monitor != null) {
+    monitors.splice(monitors.indexOf(monitor), 1)
+    monitor.stop()
 
-  monitors.splice(monitors.indexOf(monitor), 1)
-  monitor.stop()
+    if (removeFromDb) {
+      await Database.removeConnectionsForRoom(
+        monitor.data.host,
+        monitor.data.port,
+        String(monitor.channel.id)
+      )
+      await Database.deletePresenceForRoom(getRoomKeyFromData(monitor.data))
+    }
 
-  if (removeFromDb) {
-    Database.removeConnection(monitor)
+    await Database.createLog(
+      monitor.guild.id,
+      '0',
+      `Disconnected from ${monitor.data.host}:${monitor.data.port}`
+    )
+    return
   }
 
-  Database.createLog(
-    monitor.guild.id,
-    '0',
-    `Disconnected from ${monitor.data.host}:${monitor.data.port}`
-  )
+  if (removeFromDb) {
+    const matches = await Database.findConnectionsByUri(uri)
+
+    if (matches.length > 0) {
+      const first = matches[0]
+      await Database.removeConnectionsForRoom(
+        String(first.host).trim(),
+        Number(first.port),
+        String(first.channel)
+      )
+      await Database.deletePresenceForRoom(`${String(first.host).trim()}:${Number(first.port)}|${String(first.channel)}`)
+    }
+  }
 }
 
-function removeByRoomKey (roomKey: string, removeFromDb: boolean = true) {
+async function removeByRoomKey (roomKey: string, removeFromDb: boolean = true) {
   const monitor = monitors.find(
     (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
   )
 
-  if (monitor == null) return
+  if (monitor != null) {
+    monitors.splice(monitors.indexOf(monitor), 1)
+    monitor.stop()
 
-  monitors.splice(monitors.indexOf(monitor), 1)
-  monitor.stop()
+    if (removeFromDb) {
+      await Database.removeConnectionsForRoom(
+        monitor.data.host.trim(),
+        monitor.data.port,
+        String(monitor.channel.id)
+      )
+      await Database.deletePresenceForRoom(roomKey)
+    }
 
-  if (removeFromDb) {
-    Database.removeConnection(monitor)
+    await Database.createLog(
+      monitor.guild.id,
+      '0',
+      `Disconnected from ${monitor.data.host}:${monitor.data.port}`
+    )
+    return
   }
 
-  Database.createLog(
-    monitor.guild.id,
-    '0',
-    `Disconnected from ${monitor.data.host}:${monitor.data.port}`
-  )
+  if (removeFromDb) {
+    const [hostPort, channel] = roomKey.split('|')
+    if (hostPort && channel) {
+      const [hostRaw, portRaw] = hostPort.split(':')
+      const host = hostRaw?.trim()
+      const port = parseInt(portRaw ?? '', 10)
+
+      if (host && Number.isFinite(port)) {
+        await Database.removeConnectionsForRoom(host, port, channel)
+        await Database.deletePresenceForRoom(roomKey)
+      }
+    }
+  }
 }
 
 function has (uri: string) {
