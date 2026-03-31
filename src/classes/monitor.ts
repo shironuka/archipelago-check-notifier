@@ -29,6 +29,7 @@ type PresenceEntry = {
 }
 
 const DEFAULT_EMBED_COLOR = 0x0099FF
+const MAX_RECONNECT_ATTEMPTS = 3
 
 export default class Monitor {
   client: Client
@@ -210,11 +211,19 @@ export default class Monitor {
     if (!this.isActive) return
     if (this.reconnectTimeout) return
 
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn(
+        `Reconnect limit reached for ${this.data.host}:${this.data.port}. Stopping after ${MAX_RECONNECT_ATTEMPTS} attempts.`
+      )
+      this.isReconnecting = false
+      return
+    }
+
     this.reconnectAttempts += 1
     const delay = this.reconnectAttempts <= 1 ? 10000 : 30000
 
     console.log(
-      `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${delay / 1000}s (attempt ${this.reconnectAttempts})`
+      `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${delay / 1000}s (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
     )
 
     this.reconnectTimeout = setTimeout(() => {
@@ -530,6 +539,7 @@ export default class Monitor {
     if (this.isReconnecting) return
 
     this.isReconnecting = true
+    this.reconnectAttempts = 0
 
     console.warn(`Disconnected from ${this.data.host}:${this.data.port}; scheduling reconnect.`)
     this.scheduleReconnect()
@@ -546,7 +556,7 @@ export default class Monitor {
     }
 
     console.log(
-      `Attempting reconnect to ${this.data.host}:${this.data.port} as ${this.data.player} (attempt ${this.reconnectAttempts + 1})`
+      `Attempting reconnect to ${this.data.host}:${this.data.port} as ${this.data.player} (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
     )
 
     try {
@@ -568,6 +578,15 @@ export default class Monitor {
       console.log(`Reconnect successful for ${this.data.host}:${this.data.port}`)
     } catch (err) {
       console.error(`Reconnect failed for ${this.data.host}:${this.data.port}:`, err)
+
+      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error(
+          `Reconnect abandoned for ${this.data.host}:${this.data.port} after ${MAX_RECONNECT_ATTEMPTS} attempts.`
+        )
+        this.isReconnecting = false
+        return
+      }
+
       this.scheduleReconnect()
     }
   }
