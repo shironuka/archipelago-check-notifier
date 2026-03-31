@@ -156,6 +156,9 @@ Once deployed, the bot provides these slash commands:
     - `player` - Player filter
 - `/refresh` - Disconnect and reconnect an Archipelago monitor.
 - `/connections` - Shows active Archipelago connections. Provides option to unmonitor as well.
+- `/setcompletion` - Allows users to set player completed game manually. Supports optional flags for additional information:
+    - `host` - Optional host name
+    - `game` - Optinal game name.
 
 ---
 
@@ -177,6 +180,7 @@ Once deployed, the bot provides these slash commands:
 │   │   ├── monitorcommand.ts           # /monitor slash command
 │   │   ├── pingcommand.ts              # /ping slash command
 │   │   ├── refreshcommand.ts           # /refresh slash command
+│   │   ├── setcompletioncommand.ts     # /setcompletion slash command
 │   │   ├── unlinkcommand.ts            # /unlink slash command
 │   │   └── unmonitorcommand.ts         # /unmonitor slash command
 │   └── utils/
