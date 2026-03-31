@@ -142,7 +142,7 @@ Once deployed, the bot provides these slash commands:
     - `mention_completion` - @ for finishing goal (default: true)
     - `mention_hints` - @ for hints (default: true)
     - `embedded_color` - Optional embed color in hex, like FF0000 or 00FFAA
--`/monitor-advance` - Start monitoring an Archipelago session with specified host, port and player. Supports same optional flags from `/monitor`
+- `/monitor-advance` - Start monitoring an Archipelago session with specified host, port and player. Supports same optional flags from `/monitor`
 - `/unmonitor` - Stop monitoring a session
 - `/link` - Link an Archipelago player name to a Discord user. Supports optional flags to override monitor defaults for that user:
     - `mention_join_leave` - @ you for join/leave (default: false)
@@ -165,18 +165,24 @@ Once deployed, the bot provides these slash commands:
 ├── index.ts              # Main entry point, Discord client setup
 ├── src/
 │   ├── classes/
+│   │   ├── commands.ts   # Import class 
 │   │   ├── monitor.ts    # Archipelago connection monitoring
 │   │   ├── connection.ts # Database connection type
 │   │   └── monitordata.ts# Monitor data structure
 │   ├── commands/
-│   │   ├── monitorcommand.ts   # /monitor slash command
-│   │   ├── unmonitorcommand.ts # /unmonitor slash command
-│   │   ├── linkcommand.ts      # /link slash command
-│   │   ├── unlinkcommand.ts    # /unlink slash command
-│   │   ├── linkscommand.ts     # /links slash command
-│   │   └── refreshcommand.ts   # /refresh slash command
+│   │   ├── connectionscommand.ts       # /connections slash command
+│   │   ├── linkcommand.ts              # /link slash command
+│   │   ├── linkscommand.ts             # /links slash command
+│   │   ├── monitoradvancecommand.ts    # /monitoradvance slash command
+│   │   ├── monitorcommand.ts           # /monitor slash command
+│   │   ├── pingcommand.ts              # /ping slash command
+│   │   ├── refreshcommand.ts           # /refresh slash command
+│   │   ├── unlinkcommand.ts            # /unlink slash command
+│   │   └── unmonitorcommand.ts         # /unmonitor slash command
 │   └── utils/
-│       └── database.ts   # MySQL database operations
+│       ├── database.ts       # MySQL database operations
+│       ├── monitor.ts        # Monitor helper file
+│       └── randohelper.ts    # Player helper file
 ├── tsconfig.json         # TypeScript configuration
 └── package.json          # Dependencies and scripts
 ```
