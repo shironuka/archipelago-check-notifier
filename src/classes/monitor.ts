@@ -22,6 +22,12 @@ type QueuedMessage = {
   color?: number
 }
 
+type PresenceEntry = {
+  status: PresenceState,
+  game?: string,
+  updatedAt?: Date
+}
+
 const DEFAULT_EMBED_COLOR = 0x0099FF
 
 export default class Monitor {
@@ -45,7 +51,7 @@ export default class Monitor {
 
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
 
-  dbPresence: Map<string, { status: PresenceState, game?: string }> = new Map()
+  dbPresence: Map<string, PresenceEntry> = new Map()
 
   queue = {
     hints: [] as QueuedMessage[],
@@ -83,7 +89,7 @@ export default class Monitor {
         const playerId = parseInt(slot.text)
         const playerName = this.client.players.findPlayer(playerId)?.name
         const color = this.getPlayerEmbedColor(playerName, linkMap)
-        if (color !== DEFAULT_EMBED_COLOR || linkMap.has(playerName)) {
+        if (color !== DEFAULT_EMBED_COLOR || (playerName && linkMap.has(playerName))) {
           return color
         }
       }
@@ -118,8 +124,14 @@ export default class Monitor {
         const name = String(row.player_name)
         const status = String(row.status) as PresenceState
         const game = row.game != null ? String(row.game) : undefined
+        const updatedAt =
+          row.updated_at instanceof Date
+            ? row.updated_at
+            : row.updated_at != null
+              ? new Date(row.updated_at)
+              : undefined
 
-        this.dbPresence.set(name, { status, game })
+        this.dbPresence.set(name, { status, game, updatedAt })
 
         if (status === 'online') {
           this.knownPlayers.add(name)
@@ -150,7 +162,11 @@ export default class Monitor {
         status
       )
 
-      this.dbPresence.set(playerName, { status, game })
+      this.dbPresence.set(playerName, {
+        status,
+        game,
+        updatedAt: new Date()
+      })
     } catch (err) {
       console.error(`Failed to save presence for ${playerName} in ${this.getRoomKey()}:`, err)
     }
@@ -263,7 +279,7 @@ export default class Monitor {
     }
   }
 
-  getPlayerStatus (playerName?: string | null) {
+  getPlayerStatus (playerName?: string | null): PresenceState {
     if (playerName == null || playerName.trim().length === 0) return 'unknown'
 
     const name = playerName.trim()
@@ -272,6 +288,13 @@ export default class Monitor {
     if (this.knownPlayers.has(name)) return 'offline'
 
     return this.dbPresence.get(name)?.status ?? 'unknown'
+  }
+
+  getPlayerLastSeenAt (playerName?: string | null): Date | null {
+    if (playerName == null || playerName.trim().length === 0) return null
+
+    const name = playerName.trim()
+    return this.dbPresence.get(name)?.updatedAt ?? null
   }
 
   isPlayerOnline (playerName?: string | null) {
@@ -502,7 +525,7 @@ export default class Monitor {
     this.client.socket.on('printJSON', this.onJSON.bind(this))
   }
 
-onDisconnect () {
+  onDisconnect () {
     if (!this.isActive) return
     if (this.isReconnecting) return
 
@@ -539,9 +562,6 @@ onDisconnect () {
       this.startPresenceSuppressWindow()
       await this.loadPresenceFromDb()
 
-      // Trust the authenticated tracker slot after a successful reconnect.
-      // This fixes stale "offline" status when the player was already online
-      // before the bot reconnected and no fresh Join packet is emitted.
       this.setPlayerOnlineByName(this.data.player)
       await this.savePresence(this.data.player, 'online', this.data.game)
 
@@ -597,7 +617,7 @@ onDisconnect () {
       case 'Join': {
         const joinedPlayer = this.client.players.findPlayer(packet.slot)?.name
         const joinedGame = this.client.players.findPlayer(packet.slot)?.game
-        const selfPlayer = this.data.player?.trim()
+        const selfPlayer = this.data.player?.trim() ?? ''
 
         if (
           this.suppressPresenceMessages &&

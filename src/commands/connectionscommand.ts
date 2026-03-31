@@ -36,6 +36,57 @@ function statusLabel (status: string) {
   }
 }
 
+function formatRelativeTime (date?: Date | null) {
+  if (!date) return null
+
+  const diffMs = Date.now() - date.getTime()
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null
+
+  const seconds = Math.floor(diffMs / 1000)
+  if (seconds < 60) return 'just now'
+
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  }
+
+  const days = Math.floor(hours / 24)
+  if (days < 30) {
+    return `${days} day${days === 1 ? '' : 's'} ago`
+  }
+
+  const months = Math.floor(days / 30)
+  if (months < 12) {
+    return `${months} month${months === 1 ? '' : 's'} ago`
+  }
+
+  const years = Math.floor(days / 365)
+  return `${years} year${years === 1 ? '' : 's'} ago`
+}
+
+function statusWithLastSeen (monitor: any, playerName: string) {
+  const status = monitor.getPlayerStatus(playerName)
+
+  if (status !== 'offline') {
+    return statusLabel(status)
+  }
+
+  const lastSeenAt = typeof monitor.getPlayerLastSeenAt === 'function'
+    ? monitor.getPlayerLastSeenAt(playerName)
+    : null
+
+  const relative = formatRelativeTime(lastSeenAt)
+
+  return relative
+    ? `${statusLabel(status)} (last seen ${relative})`
+    : statusLabel(status)
+}
+
 export function buildConnectionsView (guildId: string, page: number = 0) {
   const monitors = Monitors.get(guildId)
   const grouped = groupByRoom(monitors)
@@ -73,7 +124,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
 
         const playerLines = roomPlayers.map((player: any) => {
           const trackedMarker = trackedSet.has(player.name) ? '📌 ' : ''
-          return `• ${trackedMarker}\`${player.name}\` — ${statusLabel(monitor.getPlayerStatus(player.name))}`
+          return `• ${trackedMarker}\`${player.name}\` — ${statusWithLastSeen(monitor, player.name)}`
         }).join('\n')
 
         return [
