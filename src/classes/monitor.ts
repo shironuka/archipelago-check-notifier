@@ -25,7 +25,9 @@ type QueuedMessage = {
 type PresenceEntry = {
   status: PresenceState,
   game?: string,
-  updatedAt?: Date
+  updatedAt?: Date,
+  completed: boolean,
+  completedAt?: Date
 }
 
 const DEFAULT_EMBED_COLOR = 0x0099FF
@@ -49,6 +51,7 @@ export default class Monitor {
 
   onlinePlayers: Set<string> = new Set()
   knownPlayers: Set<string> = new Set()
+  completedPlayers: Set<string> = new Set()
 
   trackedPlayers: Map<string, { player: string, game?: string }> = new Map()
 
@@ -120,6 +123,9 @@ export default class Monitor {
       const rows = await Database.getPresenceForRoom(this.getRoomKey())
 
       this.dbPresence.clear()
+      this.knownPlayers.clear()
+      this.onlinePlayers.clear()
+      this.completedPlayers.clear()
 
       for (const row of rows) {
         const name = String(row.player_name)
@@ -131,8 +137,21 @@ export default class Monitor {
             : row.updated_at != null
               ? new Date(row.updated_at)
               : undefined
+        const completed = !!row.completed
+        const completedAt =
+          row.completed_at instanceof Date
+            ? row.completed_at
+            : row.completed_at != null
+              ? new Date(row.completed_at)
+              : undefined
 
-        this.dbPresence.set(name, { status, game, updatedAt })
+        this.dbPresence.set(name, {
+          status,
+          game,
+          updatedAt,
+          completed,
+          completedAt
+        })
 
         if (status === 'online') {
           this.knownPlayers.add(name)
@@ -140,6 +159,10 @@ export default class Monitor {
         } else if (status === 'offline') {
           this.knownPlayers.add(name)
           this.onlinePlayers.delete(name)
+        }
+
+        if (completed) {
+          this.completedPlayers.add(name)
         }
       }
     } catch (err) {
@@ -163,13 +186,56 @@ export default class Monitor {
         status
       )
 
+      const existing = this.dbPresence.get(playerName)
+
       this.dbPresence.set(playerName, {
         status,
         game,
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        completed: existing?.completed ?? false,
+        completedAt: existing?.completedAt
       })
     } catch (err) {
       console.error(`Failed to save presence for ${playerName} in ${this.getRoomKey()}:`, err)
+    }
+  }
+
+  async setPlayerCompletedState (
+    playerName?: string | null,
+    completed: boolean = true,
+    game?: string
+  ) {
+    if (playerName == null || playerName.trim().length === 0) return
+
+    const name = playerName.trim()
+    const existing = this.dbPresence.get(name)
+
+    try {
+      await Database.setPresenceCompleted(
+        this.getRoomKey(),
+        this.data.host,
+        this.data.port,
+        this.data.channel,
+        name,
+        game ?? existing?.game,
+        completed
+      )
+
+      if (completed) {
+        this.completedPlayers.add(name)
+      } else {
+        this.completedPlayers.delete(name)
+      }
+
+      this.dbPresence.set(name, {
+        status: existing?.status ?? 'unknown',
+        game: game ?? existing?.game,
+        updatedAt: existing?.updatedAt,
+        completed,
+        completedAt: completed ? new Date() : undefined
+      })
+    } catch (err) {
+      console.error(`Failed to set completion for ${name} in ${this.getRoomKey()}:`, err)
     }
   }
 
@@ -304,6 +370,11 @@ export default class Monitor {
 
     const name = playerName.trim()
     return this.dbPresence.get(name)?.updatedAt ?? null
+  }
+
+  hasPlayerCompleted (playerName?: string | null) {
+    if (playerName == null || playerName.trim().length === 0) return false
+    return this.completedPlayers.has(playerName.trim())
   }
 
   isPlayerOnline (playerName?: string | null) {
@@ -681,6 +752,10 @@ export default class Monitor {
 
       case 'Goal': {
         const playerName = this.client.players.findPlayer(packet.slot)?.name
+        const playerGame = this.client.players.findPlayer(packet.slot)?.game
+
+        await this.setPlayerCompletedState(playerName, true, playerGame)
+
         const color = this.getPlayerEmbedColor(playerName, linkMap)
         this.send(`${formatPlayer(packet.slot, this.data.mention_completion, 'mention_completion')} has completed their goal!`, undefined, color)
         break
@@ -688,6 +763,10 @@ export default class Monitor {
 
       case 'Release': {
         const playerName = this.client.players.findPlayer(packet.slot)?.name
+        const playerGame = this.client.players.findPlayer(packet.slot)?.game
+
+        await this.setPlayerCompletedState(playerName, true, playerGame)
+
         const color = this.getPlayerEmbedColor(playerName, linkMap)
         this.send(`${formatPlayer(packet.slot, this.data.mention_item_finder, 'mention_item_finder')} has released their remaining items!`, undefined, color)
         break

@@ -100,6 +100,17 @@ async function migrate (): Promise<void> {
   if (!linkColumnNames.includes('embed_color')) {
     await pool.query('ALTER TABLE user_links ADD COLUMN embed_color VARCHAR(16) NULL')
   }
+
+  // ===== presence_status table migrations =====
+  const [presenceColumns]: any = await pool.query('SHOW COLUMNS FROM presence_status')
+  const presenceColumnNames = presenceColumns.map((c: any) => c.Field)
+
+  if (!presenceColumnNames.includes('completed')) {
+    await pool.query('ALTER TABLE presence_status ADD COLUMN completed TINYINT(1) NOT NULL DEFAULT 0')
+  }
+  if (!presenceColumnNames.includes('completed_at')) {
+    await pool.query('ALTER TABLE presence_status ADD COLUMN completed_at TIMESTAMP NULL DEFAULT NULL')
+  }
 }
 
 async function linkUser (
@@ -289,9 +300,48 @@ async function upsertPresence (
   )
 }
 
+async function setPresenceCompleted (
+  roomKey: string,
+  host: string,
+  port: number,
+  channel: string,
+  playerName: string,
+  game: string | undefined,
+  completed: boolean
+) {
+  await pool.query(
+    `INSERT INTO presence_status (
+      room_key,
+      host,
+      port,
+      channel,
+      player_name,
+      game,
+      status,
+      completed,
+      completed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'unknown', ?, ?)
+    ON DUPLICATE KEY UPDATE
+      game = COALESCE(VALUES(game), game),
+      completed = VALUES(completed),
+      completed_at = VALUES(completed_at)`,
+    [
+      roomKey,
+      host,
+      port,
+      channel,
+      playerName,
+      game ?? null,
+      completed ? 1 : 0,
+      completed ? new Date() : null
+    ]
+  )
+}
+
 async function getPresenceForRoom (roomKey: string): Promise<any[]> {
   const [rows] = await pool.query(
-    `SELECT room_key, host, port, channel, player_name, game, status, updated_at
+    `SELECT room_key, host, port, channel, player_name, game, status, updated_at, completed, completed_at
      FROM presence_status
      WHERE room_key = ?`,
     [roomKey]
@@ -318,6 +368,7 @@ const Database = {
   unlinkUser,
   getLinks,
   upsertPresence,
+  setPresenceCompleted,
   getPresenceForRoom,
   deletePresenceForRoom
 }

@@ -9,6 +9,7 @@ import LinksCommand from './commands/linkscommand'
 import RefreshCommand from './commands/refreshcommand'
 import MonitorAdvanceCommand from './commands/monitoradvancecommand'
 import ConnectionsCommand from './commands/connectionscommand'
+import SetCompletionCommand from './commands/setcompletioncommand'
 
 let restClient: REST
 
@@ -29,6 +30,7 @@ async function Init (client: Client) {
   commandList.push(new UnlinkCommand(client))
   commandList.push(new LinksCommand(client))
   commandList.push(new RefreshCommand(client))
+  commandList.push(new SetCompletionCommand(client))
 
   if (client.token == null || client.application == null) return
 
