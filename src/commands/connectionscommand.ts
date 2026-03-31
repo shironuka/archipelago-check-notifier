@@ -76,6 +76,10 @@ function statusWithLastSeen (monitor: any, playerName: string) {
     return statusLabel(status)
   }
 
+  if (typeof monitor.hasPlayerCompleted === 'function' && monitor.hasPlayerCompleted(playerName)) {
+    return statusLabel(status)
+  }
+
   const lastSeenAt = typeof monitor.getPlayerLastSeenAt === 'function'
     ? monitor.getPlayerLastSeenAt(playerName)
     : null
