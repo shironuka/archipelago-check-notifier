@@ -19,6 +19,12 @@ function getTrackedKeyFromData (data: MonitorData) {
   return `${getRoomKeyFromData(data)}|${data.player.trim()}|${normalizeGame(data.game)}`
 }
 
+function getByRoomKey (roomKey: string) {
+  return monitors.find(
+    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
+  )
+}
+
 function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   data.host = data.host.trim()
   data.player = data.player.trim()
@@ -27,9 +33,7 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
   const uri = `${data.host}:${data.port}`
   const roomKey = getRoomKeyFromData(data)
 
-  const existing = monitors.find(
-    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
-  )
+  const existing = getByRoomKey(roomKey)
 
   if (existing != null) {
     existing.addTrackedPlayer(data)
@@ -139,9 +143,7 @@ async function remove (uri: string, removeFromDb: boolean = true) {
 }
 
 async function removeByRoomKey (roomKey: string, removeFromDb: boolean = true) {
-  const monitor = monitors.find(
-    (monitor) => `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}` === roomKey
-  )
+  const monitor = getByRoomKey(roomKey)
 
   if (monitor != null) {
     monitors.splice(monitors.indexOf(monitor), 1)
@@ -202,6 +204,7 @@ const Monitors = {
   has,
   hasRoomKey,
   get,
+  getByRoomKey,
   getRoomKeyFromData,
   getTrackedKeyFromData
 }

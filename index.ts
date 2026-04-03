@@ -72,10 +72,11 @@ client.on(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton()) {
-      const isRemoveConnectionButton =
-        interaction.customId.startsWith('connections_remove_room:')
+      const isManageConnectionsButton =
+        interaction.customId.startsWith('connections_remove_room:') ||
+        interaction.customId.startsWith('connections_reconnect_room:')
 
-      if (isRemoveConnectionButton) {
+      if (isManageConnectionsButton) {
         const member = interaction.member
         const hasAdmin =
           member != null &&
@@ -136,9 +137,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const page = parseInt(parts[2] ?? '0')
         const roomKey = decodeURIComponent(encodedRoomKey)
 
-        if (Monitors.hasRoomKey(roomKey)) {
-          Monitors.removeByRoomKey(roomKey)
+        await Monitors.removeByRoomKey(roomKey, true)
+
+        const view = buildConnectionsView(interaction.guildId, page)
+        await interaction.update(view)
+        return
+      }
+
+      if (interaction.customId.startsWith('connections_reconnect_room:')) {
+        if (!interaction.guildId) {
+          await interaction.reply({
+            content: 'This button can only be used in a server.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
         }
+
+        const parts = interaction.customId.split(':')
+        const encodedRoomKey = parts[1] ?? ''
+        const page = parseInt(parts[2] ?? '0')
+        const roomKey = decodeURIComponent(encodedRoomKey)
+
+        const monitor = Monitors.getByRoomKey(roomKey)
+
+        if (monitor == null) {
+          await interaction.reply({
+            content: 'That room is not currently loaded as a live monitor.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        if (monitor.isConnectedToRoom()) {
+          const view = buildConnectionsView(interaction.guildId, page)
+          await interaction.update(view)
+          return
+        }
+
+        void monitor.reconnect()
 
         const view = buildConnectionsView(interaction.guildId, page)
         await interaction.update(view)
@@ -204,7 +240,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         if (Monitors.has(`${connection.host}:${connection.port}`)) {
-          Monitors.remove(`${connection.host}:${connection.port}`, false)
+          await Monitors.remove(`${connection.host}:${connection.port}`, false)
         }
 
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] })

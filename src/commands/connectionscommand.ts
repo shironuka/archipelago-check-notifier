@@ -36,6 +36,23 @@ function statusLabel (status: string) {
   }
 }
 
+function roomConnectionLabel (monitor: any) {
+  const state = typeof monitor.getConnectionState === 'function'
+    ? monitor.getConnectionState()
+    : 'connected'
+
+  switch (state) {
+    case 'connected':
+      return '🟢 Connected'
+    case 'reconnecting':
+      return '🟡 Reconnecting'
+    case 'disconnected':
+      return '🔴 Disconnected'
+    default:
+      return '⚪ Unknown'
+  }
+}
+
 function formatRelativeTime (date?: Date | null) {
   if (!date) return null
 
@@ -133,6 +150,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
 
         return [
           `**#${absoluteIndex} — \`${uri}\`**`,
+          `Room Status: **${roomConnectionLabel(monitor)}**`,
           `Summary: **${onlineCount}/${roomPlayers.length} online**`,
           `Player Status:\n${playerLines}`,
           `Channel: <#${monitor.data.channel}>`
@@ -142,6 +160,8 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
     .setFooter({ text: `Page ${safePage + 1} of ${totalPages}` })
 
   const roomButtonsRow = new ActionRowBuilder<ButtonBuilder>()
+  const reconnectButtonsRow = new ActionRowBuilder<ButtonBuilder>()
+
   for (const [, group] of pageItems) {
     const monitor = group[0]
     const roomKey = `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}`
@@ -151,6 +171,18 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
         .setCustomId(`connections_remove_room:${encodeURIComponent(roomKey)}:${safePage}`)
         .setLabel(`❌ ${monitor.data.port}`)
         .setStyle(ButtonStyle.Danger)
+    )
+
+    const canReconnect = typeof monitor.canManualReconnect === 'function'
+      ? monitor.canManualReconnect()
+      : false
+
+    reconnectButtonsRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`connections_reconnect_room:${encodeURIComponent(roomKey)}:${safePage}`)
+        .setLabel(`🔄 ${monitor.data.port}`)
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!canReconnect)
     )
   }
 
@@ -169,7 +201,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
 
   return {
     embeds: [embed],
-    components: [roomButtonsRow, navRow]
+    components: [roomButtonsRow, reconnectButtonsRow, navRow]
   }
 }
 

@@ -17,6 +17,8 @@ import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
 
 type PresenceState = 'online' | 'offline' | 'unknown'
+type ConnectionState = 'connected' | 'reconnecting' | 'disconnected'
+
 type QueuedMessage = {
   message: string,
   color?: number
@@ -32,6 +34,8 @@ type PresenceEntry = {
 
 const DEFAULT_EMBED_COLOR = 0x0099FF
 const MAX_RECONNECT_ATTEMPTS = 3
+const MAX_DISCONNECT_CYCLES = 3
+const DISCONNECT_WINDOW_MS = 10 * 60 * 1000
 
 export default class Monitor {
   client: Client
@@ -43,6 +47,7 @@ export default class Monitor {
   isActive: boolean = true
   reconnectTimeout: NodeJS.Timeout | null = null
   reconnectAttempts: number = 0
+  connectionState: ConnectionState = 'connected'
 
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
@@ -57,6 +62,8 @@ export default class Monitor {
 
   dbPresence: Map<string, PresenceEntry> = new Map()
 
+  disconnectTimestamps: number[] = []
+
   queue = {
     hints: [] as QueuedMessage[],
     items: [] as QueuedMessage[]
@@ -68,6 +75,33 @@ export default class Monitor {
 
   private getRoomLabel () {
     return `${this.data.host}:${this.data.port}`
+  }
+
+  getConnectionState (): ConnectionState {
+    return this.connectionState
+  }
+
+  isConnectedToRoom () {
+    return this.connectionState === 'connected'
+  }
+
+  canManualReconnect () {
+    return this.connectionState !== 'connected'
+  }
+
+  private pruneDisconnectTimestamps () {
+    const cutoff = Date.now() - DISCONNECT_WINDOW_MS
+    this.disconnectTimestamps = this.disconnectTimestamps.filter(ts => ts >= cutoff)
+  }
+
+  private canStartAnotherDisconnectCycle () {
+    this.pruneDisconnectTimestamps()
+    return this.disconnectTimestamps.length < MAX_DISCONNECT_CYCLES
+  }
+
+  private recordDisconnectCycle () {
+    this.pruneDisconnectTimestamps()
+    this.disconnectTimestamps.push(Date.now())
   }
 
   private parseEmbedColor (raw?: string | null): number | undefined {
@@ -242,6 +276,7 @@ export default class Monitor {
   stop () {
     this.isActive = false
     this.isReconnecting = false
+    this.connectionState = 'disconnected'
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout)
@@ -282,10 +317,12 @@ export default class Monitor {
         `Reconnect limit reached for ${this.data.host}:${this.data.port}. Stopping after ${MAX_RECONNECT_ATTEMPTS} attempts.`
       )
       this.isReconnecting = false
+      this.connectionState = 'disconnected'
       return
     }
 
     this.reconnectAttempts += 1
+    this.connectionState = 'reconnecting'
     const delay = this.reconnectAttempts <= 1 ? 10000 : 30000
 
     console.log(
@@ -588,6 +625,7 @@ export default class Monitor {
   constructor (client: Client, monitorData: MonitorData, discordClient: DiscordClient) {
     this.client = client
     this.data = monitorData
+    this.connectionState = 'connected'
 
     const channel = discordClient.channels.cache.get(monitorData.channel)
     if (!channel || !channel.isTextBased() || !(channel instanceof GuildChannel)) {
@@ -609,8 +647,19 @@ export default class Monitor {
     if (!this.isActive) return
     if (this.isReconnecting) return
 
+    if (!this.canStartAnotherDisconnectCycle()) {
+      console.warn(
+        `Disconnect cycle limit reached for ${this.data.host}:${this.data.port}. Stopping reconnect attempts for now.`
+      )
+      this.isReconnecting = false
+      this.connectionState = 'disconnected'
+      return
+    }
+
+    this.recordDisconnectCycle()
     this.isReconnecting = true
     this.reconnectAttempts = 0
+    this.connectionState = 'reconnecting'
 
     console.warn(`Disconnected from ${this.data.host}:${this.data.port}; scheduling reconnect.`)
     this.scheduleReconnect()
@@ -620,6 +669,7 @@ export default class Monitor {
     if (!this.isActive) return
 
     this.isReconnecting = true
+    this.connectionState = 'reconnecting'
 
     const connectionOptions = {
       items: itemsHandlingFlags.all,
@@ -640,6 +690,7 @@ export default class Monitor {
 
       this.isReconnecting = false
       this.reconnectAttempts = 0
+      this.connectionState = 'connected'
       this.startPresenceSuppressWindow()
       await this.loadPresenceFromDb()
 
@@ -655,6 +706,7 @@ export default class Monitor {
           `Reconnect abandoned for ${this.data.host}:${this.data.port} after ${MAX_RECONNECT_ATTEMPTS} attempts.`
         )
         this.isReconnecting = false
+        this.connectionState = 'disconnected'
         return
       }
 
