@@ -126,6 +126,23 @@ async function linkUser (
   },
   embedColor?: string
 ) {
+  const [existingRows]: any = await pool.query(
+    'SELECT * FROM user_links WHERE guild_id = ? AND archipelago_name = ?',
+    [guildId, archipelagoName]
+  )
+
+  const existing = existingRows[0]
+
+  const finalFlags = {
+    mention_join_leave: flags?.mention_join_leave ?? (existing ? !!existing.mention_join_leave : false),
+    mention_item_finder: flags?.mention_item_finder ?? (existing ? !!existing.mention_item_finder : false),
+    mention_item_receiver: flags?.mention_item_receiver ?? (existing ? !!existing.mention_item_receiver : true),
+    mention_completion: flags?.mention_completion ?? (existing ? !!existing.mention_completion : true),
+    mention_hints: flags?.mention_hints ?? (existing ? !!existing.mention_hints : true)
+  }
+
+  const finalEmbedColor = embedColor ?? existing?.embed_color ?? null
+
   const query = `
     INSERT INTO user_links (
       guild_id,
@@ -153,12 +170,12 @@ async function linkUser (
     guildId,
     archipelagoName,
     discordId,
-    flags?.mention_join_leave ?? false,
-    flags?.mention_item_finder ?? true,
-    flags?.mention_item_receiver ?? true,
-    flags?.mention_completion ?? true,
-    flags?.mention_hints ?? true,
-    embedColor ?? null
+    finalFlags.mention_join_leave,
+    finalFlags.mention_item_finder,
+    finalFlags.mention_item_receiver,
+    finalFlags.mention_completion,
+    finalFlags.mention_hints,
+    finalEmbedColor
   ])
 }
 

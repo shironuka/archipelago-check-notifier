@@ -33,9 +33,9 @@ type PresenceEntry = {
 }
 
 const DEFAULT_EMBED_COLOR = 0x0099FF
-const MAX_RECONNECT_ATTEMPTS = 3
-const MAX_DISCONNECT_CYCLES = 3
-const DISCONNECT_WINDOW_MS = 10 * 60 * 1000
+const MAX_RECONNECT_ATTEMPTS = 10
+const RECONNECT_WINDOW_MS = 3 * 60 * 1000
+const RECONNECT_DELAY_MS = Math.floor(RECONNECT_WINDOW_MS / MAX_RECONNECT_ATTEMPTS)
 
 export default class Monitor {
   client: Client
@@ -62,8 +62,6 @@ export default class Monitor {
 
   dbPresence: Map<string, PresenceEntry> = new Map()
 
-  disconnectTimestamps: number[] = []
-
   queue = {
     hints: [] as QueuedMessage[],
     items: [] as QueuedMessage[]
@@ -89,19 +87,17 @@ export default class Monitor {
     return this.connectionState !== 'connected'
   }
 
-  private pruneDisconnectTimestamps () {
-    const cutoff = Date.now() - DISCONNECT_WINDOW_MS
-    this.disconnectTimestamps = this.disconnectTimestamps.filter(ts => ts >= cutoff)
+  resetReconnectAttempts () {
+    this.reconnectAttempts = 0
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
   }
 
-  private canStartAnotherDisconnectCycle () {
-    this.pruneDisconnectTimestamps()
-    return this.disconnectTimestamps.length < MAX_DISCONNECT_CYCLES
-  }
-
-  private recordDisconnectCycle () {
-    this.pruneDisconnectTimestamps()
-    this.disconnectTimestamps.push(Date.now())
+  private sendReconnectFailureMessage () {
+    this.send(`Failed to connect to port: ${this.data.port}`)
   }
 
   private parseEmbedColor (raw?: string | null): number | undefined {
@@ -314,25 +310,26 @@ export default class Monitor {
 
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       console.warn(
-        `Reconnect limit reached for ${this.data.host}:${this.data.port}. Stopping after ${MAX_RECONNECT_ATTEMPTS} attempts.`
+        `Reconnect abandoned for ${this.data.host}:${this.data.port} after ${MAX_RECONNECT_ATTEMPTS} attempts.`
       )
+
       this.isReconnecting = false
       this.connectionState = 'disconnected'
+      this.sendReconnectFailureMessage()
       return
     }
 
     this.reconnectAttempts += 1
     this.connectionState = 'reconnecting'
-    const delay = this.reconnectAttempts <= 1 ? 10000 : 30000
 
     console.log(
-      `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${delay / 1000}s (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
+      `Scheduling reconnect for ${this.data.host}:${this.data.port} in ${RECONNECT_DELAY_MS / 1000}s (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
     )
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null
       void this.reconnect()
-    }, delay)
+    }, RECONNECT_DELAY_MS)
   }
 
   addTrackedPlayer (data: MonitorData) {
@@ -647,16 +644,6 @@ export default class Monitor {
     if (!this.isActive) return
     if (this.isReconnecting) return
 
-    if (!this.canStartAnotherDisconnectCycle()) {
-      console.warn(
-        `Disconnect cycle limit reached for ${this.data.host}:${this.data.port}. Stopping reconnect attempts for now.`
-      )
-      this.isReconnecting = false
-      this.connectionState = 'disconnected'
-      return
-    }
-
-    this.recordDisconnectCycle()
     this.isReconnecting = true
     this.reconnectAttempts = 0
     this.connectionState = 'reconnecting'
@@ -700,16 +687,6 @@ export default class Monitor {
       console.log(`Reconnect successful for ${this.data.host}:${this.data.port}`)
     } catch (err) {
       console.error(`Reconnect failed for ${this.data.host}:${this.data.port}:`, err)
-
-      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.error(
-          `Reconnect abandoned for ${this.data.host}:${this.data.port} after ${MAX_RECONNECT_ATTEMPTS} attempts.`
-        )
-        this.isReconnecting = false
-        this.connectionState = 'disconnected'
-        return
-      }
-
       this.scheduleReconnect()
     }
   }

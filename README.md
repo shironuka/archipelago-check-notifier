@@ -144,7 +144,7 @@ Once deployed, the bot provides these slash commands:
     - `embedded_color` - Optional embed color in hex, like FF0000 or 00FFAA
 - `/monitor-advance` - Start monitoring an Archipelago session with specified host, port and player. Supports same optional flags from `/monitor`
 - `/unmonitor` - Stop monitoring a session
-- `/link` - Link an Archipelago player name to a Discord user. Supports optional flags to override monitor defaults for that user:
+- `/link` - Link an Archipelago player name to a Discord user. If player already exists will update with the new info provided. Any old info for player / user will be persistent. Supports optional flags to override monitor defaults for that user:
     - `mention_join_leave` - @ you for join/leave (default: false)
     - `mention_item_finder` - @ you for finding items (default: true)
     - `mention_item_receiver` - @ you for receiving items (default: true)

@@ -174,6 +174,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return
         }
 
+        monitor.resetReconnectAttempts()
         void monitor.reconnect()
 
         const view = buildConnectionsView(interaction.guildId, page)
