@@ -8,21 +8,67 @@ import {
   MessageFlags
 } from 'discord.js'
 import Monitors from '../utils/monitors'
+import Database from '../utils/database'
 
 const PAGE_SIZE = 5
 
-function groupByRoom (monitors: any[]) {
-  const map = new Map<string, any[]>()
+type RoomGroup = {
+  roomKey: string
+  host: string
+  port: number
+  channel: string
+  monitor?: any
+  savedConnections: any[]
+  inactive: boolean
+}
 
-  for (const monitor of monitors) {
-    const key = `${monitor.data.host}:${monitor.data.port}|${monitor.data.channel}`
-    if (!map.has(key)) {
-      map.set(key, [])
-    }
-    map.get(key)!.push(monitor)
+function roomKeyFromParts (host: string, port: number, channel: string) {
+  return `${host.trim()}:${port}|${channel}`
+}
+
+function groupRooms (liveMonitors: any[], savedConnections: any[]): RoomGroup[] {
+  const map = new Map<string, RoomGroup>()
+
+  for (const monitor of liveMonitors) {
+    const host = String(monitor.data.host).trim()
+    const port = Number(monitor.data.port)
+    const channel = String(monitor.data.channel)
+    const roomKey = roomKeyFromParts(host, port, channel)
+
+    map.set(roomKey, {
+      roomKey,
+      host,
+      port,
+      channel,
+      monitor,
+      savedConnections: [],
+      inactive: false
+    })
   }
 
-  return Array.from(map.entries())
+  for (const connection of savedConnections) {
+    const host = String(connection.host).trim()
+    const port = Number(connection.port)
+    const channel = String(connection.channel)
+    const roomKey = roomKeyFromParts(host, port, channel)
+
+    const existing = map.get(roomKey)
+
+    if (existing) {
+      existing.savedConnections.push(connection)
+    } else {
+      map.set(roomKey, {
+        roomKey,
+        host,
+        port,
+        channel,
+        savedConnections: [connection],
+        inactive: true
+      })
+    }
+  }
+
+  return Array.from(map.values())
 }
 
 function statusLabel (status: string) {
@@ -36,9 +82,11 @@ function statusLabel (status: string) {
   }
 }
 
-function roomConnectionLabel (monitor: any) {
-  const state = typeof monitor.getConnectionState === 'function'
-    ? monitor.getConnectionState()
+function roomConnectionLabel (group: RoomGroup) {
+  if (group.inactive || !group.monitor) return '🔴 Inactive / Disconnected'
+
+  const state = typeof group.monitor.getConnectionState === 'function'
+    ? group.monitor.getConnectionState()
     : 'connected'
 
   switch (state) {
@@ -63,24 +111,16 @@ function formatRelativeTime (date?: Date | null) {
   if (seconds < 60) return 'just now'
 
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) {
-    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
-  }
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
 
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) {
-    return `${hours} hour${hours === 1 ? '' : 's'} ago`
-  }
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
 
   const days = Math.floor(hours / 24)
-  if (days < 30) {
-    return `${days} day${days === 1 ? '' : 's'} ago`
-  }
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`
 
   const months = Math.floor(days / 30)
-  if (months < 12) {
-    return `${months} month${months === 1 ? '' : 's'} ago`
-  }
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`
 
   const years = Math.floor(days / 365)
   return `${years} year${years === 1 ? '' : 's'} ago`
@@ -89,9 +129,7 @@ function formatRelativeTime (date?: Date | null) {
 function statusWithLastSeen (monitor: any, playerName: string) {
   const status = monitor.getPlayerStatus(playerName)
 
-  if (status !== 'offline') {
-    return statusLabel(status)
-  }
+  if (status !== 'offline') return statusLabel(status)
 
   if (typeof monitor.hasPlayerCompleted === 'function' && monitor.hasPlayerCompleted(playerName)) {
     return statusLabel(status)
@@ -108,9 +146,39 @@ function statusWithLastSeen (monitor: any, playerName: string) {
     : statusLabel(status)
 }
 
-export function buildConnectionsView (guildId: string, page: number = 0) {
-  const monitors = Monitors.get(guildId)
-  const grouped = groupByRoom(monitors)
+function buildPlayerLines (group: RoomGroup) {
+  if (group.monitor) {
+    const roomPlayers = group.monitor.getAllRoomPlayers()
+    const trackedSet = new Set(group.monitor.getTrackedPlayers().map((p: any) => p.player))
+
+    return roomPlayers.map((player: any) => {
+      const trackedMarker = trackedSet.has(player.name) ? '📌 ' : ''
+      return `• ${trackedMarker}\`${player.name}\` — ${statusWithLastSeen(group.monitor, player.name)}`
+    }).join('\n')
+  }
+
+  const uniquePlayers = new Map<string, any>()
+
+  for (const connection of group.savedConnections) {
+    const player = String(connection.player).trim()
+    if (!player) continue
+    uniquePlayers.set(player, connection)
+  }
+
+  if (uniquePlayers.size === 0) {
+    return '• No saved players found.'
+  }
+
+  return Array.from(uniquePlayers.values()).map((connection: any) => {
+    const game = connection.game ? ` (${connection.game})` : ''
+    return `• 📌 \`${connection.player}\`${game} — ⚪ Saved only`
+  }).join('\n')
+}
+
+export async function buildConnectionsView (guildId: string, page: number = 0) {
+  const liveMonitors = Monitors.get(guildId)
+  const savedConnections = await Database.getConnections()
+  const grouped = groupRooms(liveMonitors, savedConnections)
 
   const total = grouped.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -121,7 +189,7 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
       embeds: [
         new EmbedBuilder()
           .setTitle('Connections')
-          .setDescription('No active monitors.')
+          .setDescription('No active or saved monitors.')
       ],
       components: []
     }
@@ -131,56 +199,53 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
   const pageItems = grouped.slice(start, start + PAGE_SIZE)
 
   const embed = new EmbedBuilder()
-    .setTitle('Active Connections')
+    .setTitle('Connections')
     .setDescription(
-      pageItems.map(([, group], index) => {
-        const monitor = group[0]
-        const uri = `${monitor.data.host}:${monitor.data.port}`
+      pageItems.map((group, index) => {
+        const uri = `${group.host}:${group.port}`
         const absoluteIndex = start + index + 1
 
-        const roomPlayers = monitor.getAllRoomPlayers()
-        const onlineCount = roomPlayers.filter((p: any) => monitor.getPlayerStatus(p.name) === 'online').length
+        const roomPlayers = group.monitor?.getAllRoomPlayers?.() ?? []
+        const onlineCount = group.monitor
+          ? roomPlayers.filter((p: any) => group.monitor.getPlayerStatus(p.name) === 'online').length
+          : 0
 
-        const trackedSet = new Set(monitor.getTrackedPlayers().map((p: any) => p.player))
-
-        const playerLines = roomPlayers.map((player: any) => {
-          const trackedMarker = trackedSet.has(player.name) ? '📌 ' : ''
-          return `• ${trackedMarker}\`${player.name}\` — ${statusWithLastSeen(monitor, player.name)}`
-        }).join('\n')
+        const totalPlayers = group.monitor
+          ? roomPlayers.length
+          : new Set(group.savedConnections.map((c: any) => String(c.player).trim()).filter(Boolean)).size
 
         return [
           `**#${absoluteIndex} — \`${uri}\`**`,
-          `Room Status: **${roomConnectionLabel(monitor)}**`,
-          `Summary: **${onlineCount}/${roomPlayers.length} online**`,
-          `Player Status:\n${playerLines}`,
-          `Channel: <#${monitor.data.channel}>`
+          `Room Status: **${roomConnectionLabel(group)}**`,
+          group.inactive ? `Saved Rows: **${group.savedConnections.length}**` : `Summary: **${onlineCount}/${totalPlayers} online**`,
+          `Player Status:\n${buildPlayerLines(group)}`,
+          `Channel: <#${group.channel}>`
         ].join('\n')
       }).join('\n\n')
     )
     .setFooter({ text: `Page ${safePage + 1} of ${totalPages}` })
 
-  const roomButtonsRow = new ActionRowBuilder<ButtonBuilder>()
-  const reconnectButtonsRow = new ActionRowBuilder<ButtonBuilder>()
+  const removeRow = new ActionRowBuilder<ButtonBuilder>()
+  const reconnectRow = new ActionRowBuilder<ButtonBuilder>()
 
-  for (const [, group] of pageItems) {
-    const monitor = group[0]
-    const roomKey = `${monitor.data.host.trim()}:${monitor.data.port}|${monitor.data.channel}`
-
-    roomButtonsRow.addComponents(
+  for (const group of pageItems) {
+    removeRow.addComponents(
       new ButtonBuilder()
-        .setCustomId(`connections_remove_room:${encodeURIComponent(roomKey)}:${safePage}`)
-        .setLabel(`❌ ${monitor.data.port}`)
+        .setCustomId(`connections_remove_room:${encodeURIComponent(group.roomKey)}:${safePage}`)
+        .setLabel(`❌ ${group.port}`)
         .setStyle(ButtonStyle.Danger)
     )
 
-    const canReconnect = typeof monitor.canManualReconnect === 'function'
-      ? monitor.canManualReconnect()
-      : false
+    const canReconnect = group.inactive || (
+      typeof group.monitor?.canManualReconnect === 'function'
+        ? group.monitor.canManualReconnect()
+        : false
+    )
 
-    reconnectButtonsRow.addComponents(
+    reconnectRow.addComponents(
       new ButtonBuilder()
-        .setCustomId(`connections_reconnect_room:${encodeURIComponent(roomKey)}:${safePage}`)
-        .setLabel(`🔄 ${monitor.data.port}`)
+        .setCustomId(`connections_reconnect_room:${encodeURIComponent(group.roomKey)}:${safePage}`)
+        .setLabel(`🔄 ${group.port}`)
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!canReconnect)
     )
@@ -201,13 +266,13 @@ export function buildConnectionsView (guildId: string, page: number = 0) {
 
   return {
     embeds: [embed],
-    components: [roomButtonsRow, reconnectButtonsRow, navRow]
+    components: [removeRow, reconnectRow, navRow]
   }
 }
 
 export default class ConnectionsCommand extends Command {
   name = 'connections'
-  description = 'Show active Archipelago connections.'
+  description = 'Show active and saved Archipelago connections.'
 
   constructor (client: any) {
     super()
@@ -223,6 +288,6 @@ export default class ConnectionsCommand extends Command {
       return
     }
 
-    await interaction.reply(buildConnectionsView(interaction.guildId, 0))
+    await interaction.reply(await buildConnectionsView(interaction.guildId, 0))
   }
 }
