@@ -39,6 +39,7 @@ const RECONNECT_DELAY_MS = Math.floor(RECONNECT_WINDOW_MS / MAX_RECONNECT_ATTEMP
 
 export default class Monitor {
   client: Client
+  discordClient: DiscordClient
   channel: any
   guild: Guild
   data: MonitorData
@@ -146,6 +147,78 @@ export default class Monitor {
     }
 
     return embed
+  }
+
+  private getCurrentConnectedPlayerNamesFromRoomInfo (): Set<string> | null {
+    const room: any = (this.client as any).room
+    const candidates = [
+      room?.connectedPlayers,
+      room?.onlinePlayers,
+      room?.players,
+      room?.info?.players
+    ]
+
+    for (const candidate of candidates) {
+      if (!candidate) continue
+
+      const names = new Set<string>()
+
+      const addPlayer = (player: any) => {
+        const name =
+          player?.name ??
+          player?.alias ??
+          player?.playerName ??
+          player?.slotName
+
+        if (name != null && String(name).trim().length > 0) {
+          names.add(String(name).trim())
+        }
+      }
+
+      if (Array.isArray(candidate)) {
+        for (const player of candidate) {
+          addPlayer(player)
+        }
+      } else if (candidate instanceof Map) {
+        for (const [, player] of candidate) {
+          addPlayer(player)
+        }
+      } else if (typeof candidate === 'object') {
+        for (const key of Object.keys(candidate)) {
+          addPlayer(candidate[key])
+        }
+      }
+
+      if (names.size > 0) {
+        return names
+      }
+    }
+
+    return null
+  }
+
+  private async reconcileOnlinePlayersFromServer () {
+    const currentConnectedNames = this.getCurrentConnectedPlayerNamesFromRoomInfo()
+
+    if (currentConnectedNames == null) {
+      console.warn(
+        `Could not reconcile online players for ${this.getRoomLabel()} because no current connected-player list was exposed.`
+      )
+      return
+    }
+
+    for (const [playerName, presence] of this.dbPresence.entries()) {
+      if (presence.status === 'online' && !currentConnectedNames.has(playerName)) {
+        this.setPlayerOfflineByName(playerName)
+        await this.savePresence(playerName, 'offline', presence.game)
+      }
+    }
+
+    for (const playerName of currentConnectedNames) {
+      const existing = this.dbPresence.get(playerName)
+      this.setPlayerOnlineByName(playerName)
+      await this.savePresence(playerName, 'online', existing?.game)
+    }
   }
 
   private async loadPresenceFromDb () {
@@ -472,8 +545,47 @@ export default class Monitor {
     return Array.from(deduped.values())
   }
 
-  convertData (message: ItemSendJSONPacket | CollectJSONPacket | HintJSONPacket, linkMap: Map<string, any>) {
-    return message.data.map((slot) => {
+  private getItemSendFinderPlayerId (message: ItemSendJSONPacket): number | undefined {
+    const receivingPlayerId = (message as any).receiving
+
+    const itemPlayerId = (message as any).item?.player
+    if (itemPlayerId != null) {
+      return parseInt(String(itemPlayerId))
+    }
+
+    const explicitFinderId =
+      (message as any).finder ??
+      (message as any).sending
+
+    if (explicitFinderId != null) {
+      return parseInt(String(explicitFinderId))
+    }
+
+    const locationPart = message.data.find((part: any) =>
+      part.type === 'location_id' && part.player != null
+    ) as any | undefined
+
+    if (locationPart?.player != null) {
+      return parseInt(String(locationPart.player))
+    }
+
+    const playerPart = message.data.find((part: any) =>
+      part.type === 'player_id' && parseInt(String(part.text)) !== receivingPlayerId
+    ) as any | undefined
+
+    if (playerPart?.text != null) {
+      return parseInt(String(playerPart.text))
+    }
+
+    return undefined
+  }
+
+  convertData (
+    message: ItemSendJSONPacket | CollectJSONPacket | HintJSONPacket,
+    linkMap: Map<string, any>,
+    allowMentions: boolean = true
+  ) {
+    return message.data.map((slot: any) => {
       switch (slot.type) {
         case 'player_id': {
           const playerId = parseInt(slot.text)
@@ -484,7 +596,17 @@ export default class Monitor {
             let shouldMention = true
 
             if (message.type === 'ItemSend') {
-              if (playerId === (message as any).receiving) {
+              const receivingPlayerId = (message as any).receiving
+              const finderPlayerId = this.getItemSendFinderPlayerId(message as ItemSendJSONPacket)
+
+              const isOwnItem =
+                finderPlayerId != null &&
+                receivingPlayerId != null &&
+                finderPlayerId === receivingPlayerId
+
+              if (isOwnItem && playerId === receivingPlayerId) {
+                shouldMention = false
+              } else if (playerId === receivingPlayerId) {
                 shouldMention = this.data.mention_item_receiver && link.mention_item_receiver
               } else {
                 shouldMention = this.data.mention_item_finder && link.mention_item_finder
@@ -495,7 +617,7 @@ export default class Monitor {
               shouldMention = this.data.mention_item_finder && link.mention_item_finder
             }
 
-            if (shouldMention) {
+            if (shouldMention && allowMentions) {
               return `<@${link.discord_id}>`
             }
           }
@@ -513,6 +635,43 @@ export default class Monitor {
           return slot.text
       }
     }).join(' ')
+  }
+
+  private async sendItemReceiverDm (
+    message: ItemSendJSONPacket,
+    linkMap: Map<string, any>
+  ) {
+    const receivingPlayerId = (message as any).receiving
+    const finderPlayerId = this.getItemSendFinderPlayerId(message)
+
+    if (receivingPlayerId == null) return
+    if (finderPlayerId != null && finderPlayerId === receivingPlayerId) return
+
+    const receivingPlayer = this.client.players.findPlayer(receivingPlayerId)
+    const receivingPlayerName = receivingPlayer?.name
+    if (!receivingPlayerName) return
+
+    const link = linkMap.get(receivingPlayerName)
+    if (!link?.dm) return
+    if (!link.discord_id) return
+
+    const renderedMessage = this.convertData(message, linkMap, false)
+
+    try {
+      const user = await this.discordClient.users.fetch(link.discord_id)
+
+      await user.send({
+        embeds: [
+          this.buildEmbed(
+            `Archipelago • ${this.getRoomLabel()}`,
+            renderedMessage,
+            this.getPlayerEmbedColor(receivingPlayerName, linkMap)
+          ).data
+        ]
+      })
+    } catch (err) {
+      console.error(`Failed to DM item notification to ${receivingPlayerName}:`, err)
+    }
   }
 
   addQueue (message: string, type: 'hints' | 'items' = 'hints', color?: number) {
@@ -621,6 +780,7 @@ export default class Monitor {
 
   constructor (client: Client, monitorData: MonitorData, discordClient: DiscordClient) {
     this.client = client
+    this.discordClient = discordClient
     this.data = monitorData
     this.connectionState = 'connected'
 
@@ -633,7 +793,12 @@ export default class Monitor {
     this.guild = channel.guild
 
     this.startPresenceSuppressWindow()
+
     void this.loadPresenceFromDb()
+      .then(() => this.reconcileOnlinePlayersFromServer())
+      .catch(err => {
+        console.error(`Failed to initialize presence for ${this.getRoomKey()}:`, err)
+      })
 
     this.client.socket.on('connectionRefused', this.onDisconnect.bind(this))
     this.client.socket.on('disconnected', this.onDisconnect.bind(this))
@@ -658,6 +823,10 @@ export default class Monitor {
     this.isReconnecting = true
     this.connectionState = 'reconnecting'
 
+    if (this.reconnectAttempts < 1) {
+      this.reconnectAttempts = 1
+    }
+
     const connectionOptions = {
       items: itemsHandlingFlags.all,
       tags: ['Tracker']
@@ -680,6 +849,7 @@ export default class Monitor {
       this.connectionState = 'connected'
       this.startPresenceSuppressWindow()
       await this.loadPresenceFromDb()
+      await this.reconcileOnlinePlayersFromServer()
 
       this.setPlayerOnlineByName(this.data.player)
       await this.savePresence(this.data.player, 'online', this.data.game)
@@ -717,13 +887,25 @@ export default class Monitor {
 
     switch (packet.type) {
       case 'Collect':
-      case 'ItemSend':
         this.addQueue(
           this.convertData(packet, linkMap),
           'items',
           this.getFirstLinkedColorFromPacket(packet, linkMap)
         )
         break
+
+      case 'ItemSend': {
+        const renderedMessage = this.convertData(packet, linkMap)
+
+        this.addQueue(
+          renderedMessage,
+          'items',
+          this.getFirstLinkedColorFromPacket(packet, linkMap)
+        )
+
+        await this.sendItemReceiverDm(packet, linkMap)
+        break
+      }
 
       case 'Hint':
         this.addQueue(

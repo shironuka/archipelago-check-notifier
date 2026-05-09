@@ -33,31 +33,37 @@ export default class LinkCommand extends Command {
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_join_leave',
-      description: 'Whether to @ you for joining or leaving (default: false)',
+      description: 'Whether to @ you for joining or leaving',
       required: false
     },
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_item_finder',
-      description: 'Whether to @ you when you find an item (default: false)',
+      description: 'Whether to @ you when you find an item',
       required: false
     },
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_item_receiver',
-      description: 'Whether to @ you when you receive an item (default: true)',
+      description: 'Whether to @ you when you receive an item',
       required: false
     },
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_completion',
-      description: 'Whether to @ you when you complete your goal (default: true)',
+      description: 'Whether to @ you when you complete your goal',
       required: false
     },
     {
       type: ApplicationCommandOptionType.Boolean,
       name: 'mention_hints',
-      description: 'Whether to @ you when you are mentioned in a hint (default: true)',
+      description: 'Whether to @ you when you are mentioned in a hint',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.Boolean,
+      name: 'dm',
+      description: 'Whether to DM you directly when your item is found',
       required: false
     }
   ]
@@ -100,16 +106,22 @@ export default class LinkCommand extends Command {
       mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? undefined,
       mention_item_receiver: interaction.options.getBoolean('mention_item_receiver') ?? undefined,
       mention_completion: interaction.options.getBoolean('mention_completion') ?? undefined,
-      mention_hints: interaction.options.getBoolean('mention_hints') ?? undefined
+      mention_hints: interaction.options.getBoolean('mention_hints') ?? undefined,
+      dm: interaction.options.getBoolean('dm') ?? undefined
     }
 
     try {
       await Database.linkUser(interaction.guildId, player, user.id, flags, embedColor)
 
       const colorText = embedColor ? ` Embed color set to \`#${embedColor}\`.` : ''
+      const dmText = flags.dm === true
+        ? ' Direct messages enabled for received item notifications.'
+        : flags.dm === false
+          ? ' Direct messages disabled.'
+          : ''
 
       await interaction.reply({
-        content: `Linked Archipelago player **${player}** to <@${user.id}>.${colorText} Notifications involving this player will now mention them based on the selected flags.`,
+        content: `Linked Archipelago player **${player}** to <@${user.id}>.${colorText}${dmText} Existing notification settings were preserved unless you changed them.`,
         flags: [MessageFlags.Ephemeral]
       })
     } catch (err) {

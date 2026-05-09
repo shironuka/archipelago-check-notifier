@@ -103,7 +103,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const page = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, page - 1)
+        const view = await buildConnectionsView(interaction.guildId, page - 1)
         await interaction.update(view)
         return
       }
@@ -118,7 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const page = parseInt(interaction.customId.split(':')[1] ?? '0')
-        const view = buildConnectionsView(interaction.guildId, page + 1)
+        const view = await buildConnectionsView(interaction.guildId, page + 1)
         await interaction.update(view)
         return
       }
@@ -139,7 +139,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await Monitors.removeByRoomKey(roomKey, true)
 
-        const view = buildConnectionsView(interaction.guildId, page)
+        const view = await buildConnectionsView(interaction.guildId, page)
         await interaction.update(view)
         return
       }
@@ -160,25 +160,71 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const monitor = Monitors.getByRoomKey(roomKey)
 
-        if (monitor == null) {
+        if (monitor != null) {
+          if (!monitor.isConnectedToRoom()) {
+            monitor.resetReconnectAttempts()
+            void monitor.reconnect()
+          }
+
+          const view = await buildConnectionsView(interaction.guildId, page)
+          await interaction.update(view)
+          return
+        }
+
+        const [hostPort, channel] = roomKey.split('|')
+        if (!hostPort || !channel) {
           await interaction.reply({
-            content: 'That room is not currently loaded as a live monitor.',
+            content: 'Invalid room key.',
             flags: [MessageFlags.Ephemeral]
           })
           return
         }
 
-        if (monitor.isConnectedToRoom()) {
-          const view = buildConnectionsView(interaction.guildId, page)
-          await interaction.update(view)
+        const lastColon = hostPort.lastIndexOf(':')
+        if (lastColon === -1) {
+          await interaction.reply({
+            content: 'Invalid room key.',
+            flags: [MessageFlags.Ephemeral]
+          })
           return
         }
 
-        monitor.resetReconnectAttempts()
-        void monitor.reconnect()
+        const host = hostPort.slice(0, lastColon).trim()
+        const port = parseInt(hostPort.slice(lastColon + 1), 10)
 
-        const view = buildConnectionsView(interaction.guildId, page)
-        await interaction.update(view)
+        if (!host || !Number.isFinite(port)) {
+          await interaction.reply({
+            content: 'Invalid room key.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        const savedConnections = await Database.getConnections()
+        const matchingConnections = savedConnections.filter((connection: any) =>
+          String(connection.host).trim() === host &&
+          Number(connection.port) === port &&
+          String(connection.channel) === channel
+        )
+
+        if (matchingConnections.length === 0) {
+          await interaction.reply({
+            content: 'No saved connection was found for that room.',
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+
+        await interaction.deferUpdate()
+
+        for (const connection of matchingConnections) {
+          Monitors.make(connection, client).catch(err => {
+            console.error(`Failed to reconnect saved monitor ${connection.host}:${connection.port}:`, err)
+          })
+        }
+
+        const view = await buildConnectionsView(interaction.guildId, page)
+        await interaction.editReply(view)
         return
       }
 

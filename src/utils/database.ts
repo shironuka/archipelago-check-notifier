@@ -58,7 +58,6 @@ async function migrate (): Promise<void> {
     )
   `)
 
-  // ===== connections table migrations =====
   const [connectionColumns]: any = await pool.query('SHOW COLUMNS FROM connections')
   const connectionColumnNames = connectionColumns.map((c: any) => c.Field)
 
@@ -78,7 +77,6 @@ async function migrate (): Promise<void> {
     await pool.query('ALTER TABLE connections ADD COLUMN mention_hints TINYINT(1) DEFAULT 1')
   }
 
-  // ===== user_links table migrations =====
   const [linkColumns]: any = await pool.query('SHOW COLUMNS FROM user_links')
   const linkColumnNames = linkColumns.map((c: any) => c.Field)
 
@@ -100,8 +98,10 @@ async function migrate (): Promise<void> {
   if (!linkColumnNames.includes('embed_color')) {
     await pool.query('ALTER TABLE user_links ADD COLUMN embed_color VARCHAR(16) NULL')
   }
+  if (!linkColumnNames.includes('dm')) {
+    await pool.query('ALTER TABLE user_links ADD COLUMN dm TINYINT(1) DEFAULT 0')
+  }
 
-  // ===== presence_status table migrations =====
   const [presenceColumns]: any = await pool.query('SHOW COLUMNS FROM presence_status')
   const presenceColumnNames = presenceColumns.map((c: any) => c.Field)
 
@@ -122,7 +122,8 @@ async function linkUser (
     mention_item_finder?: boolean,
     mention_item_receiver?: boolean,
     mention_completion?: boolean,
-    mention_hints?: boolean
+    mention_hints?: boolean,
+    dm?: boolean
   },
   embedColor?: string
 ) {
@@ -138,7 +139,8 @@ async function linkUser (
     mention_item_finder: flags?.mention_item_finder ?? (existing ? !!existing.mention_item_finder : false),
     mention_item_receiver: flags?.mention_item_receiver ?? (existing ? !!existing.mention_item_receiver : true),
     mention_completion: flags?.mention_completion ?? (existing ? !!existing.mention_completion : true),
-    mention_hints: flags?.mention_hints ?? (existing ? !!existing.mention_hints : true)
+    mention_hints: flags?.mention_hints ?? (existing ? !!existing.mention_hints : true),
+    dm: flags?.dm ?? (existing ? !!existing.dm : false)
   }
 
   const finalEmbedColor = embedColor ?? existing?.embed_color ?? null
@@ -153,9 +155,10 @@ async function linkUser (
       mention_item_receiver,
       mention_completion,
       mention_hints,
-      embed_color
+      embed_color,
+      dm
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       discord_id = VALUES(discord_id),
       mention_join_leave = VALUES(mention_join_leave),
@@ -163,7 +166,8 @@ async function linkUser (
       mention_item_receiver = VALUES(mention_item_receiver),
       mention_completion = VALUES(mention_completion),
       mention_hints = VALUES(mention_hints),
-      embed_color = VALUES(embed_color)
+      embed_color = VALUES(embed_color),
+      dm = VALUES(dm)
   `
 
   await pool.query(query, [
@@ -175,7 +179,8 @@ async function linkUser (
     finalFlags.mention_item_receiver,
     finalFlags.mention_completion,
     finalFlags.mention_hints,
-    finalEmbedColor
+    finalEmbedColor,
+    finalFlags.dm
   ])
 }
 
@@ -199,7 +204,8 @@ async function getLinks (guildId: string): Promise<any[]> {
     mention_item_receiver: !!row.mention_item_receiver,
     mention_completion: !!row.mention_completion,
     mention_hints: !!row.mention_hints,
-    embed_color: row.embed_color ?? null
+    embed_color: row.embed_color ?? null,
+    dm: !!row.dm
   }))
 }
 
@@ -320,7 +326,6 @@ async function findConnectionsByUri (uri: string): Promise<Connection[]> {
 
 async function findConnectionsByGuildAndUri (guildId: string, uri: string): Promise<Connection[]> {
   const matches = await findConnectionsByUri(uri)
-
   return matches.filter((row: any) => String(row.channel) === guildId || row.guild_id === guildId || true)
 }
 
