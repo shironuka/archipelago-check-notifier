@@ -33,7 +33,8 @@ function normalizeLinks (links: any[]) {
     mention_item_finder: !!link.mention_item_finder,
     mention_item_receiver: !!link.mention_item_receiver,
     mention_completion: !!link.mention_completion,
-    mention_hints: !!link.mention_hints
+    mention_hints: !!link.mention_hints,
+    dm: !!link.dm
   }))
 }
 
@@ -104,7 +105,7 @@ export function buildLinksView (
         `**User:** <@${link.discord_id}>`,
         `**Embed:** \`${colorText}\``,
         `**Flags:** ${boolDot(link.mention_join_leave)} Join/Leave  ${boolDot(link.mention_item_finder)} Finder  ${boolDot(link.mention_item_receiver)} Receiver`,
-        `**More:** ${boolDot(link.mention_completion)} Completion  ${boolDot(link.mention_hints)} Hints`
+        `**More:** ${boolDot(link.mention_completion)} Completion  ${boolDot(link.mention_hints)} Hints  ${boolDot(link.dm)} DM`
       ].join('\n'),
       inline: false
     })
