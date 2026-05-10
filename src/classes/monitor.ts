@@ -76,6 +76,16 @@ export default class Monitor {
     return `${this.data.host}:${this.data.port}`
   }
 
+  private normalizePlayerLinkKey (playerName?: string | null) {
+    return String(playerName ?? '').trim().toLowerCase()
+  }
+
+  private getLinkForPlayer (playerName: string | undefined | null, linkMap: Map<string, any>) {
+    const key = this.normalizePlayerLinkKey(playerName)
+    if (!key) return null
+    return linkMap.get(key) ?? null
+  }
+
   getConnectionState (): ConnectionState {
     return this.connectionState
   }
@@ -110,7 +120,7 @@ export default class Monitor {
 
   private getPlayerEmbedColor (playerName: string | undefined, linkMap: Map<string, any>): number {
     if (!playerName) return DEFAULT_EMBED_COLOR
-    const link = linkMap.get(playerName)
+    const link = this.getLinkForPlayer(playerName, linkMap)
     const parsed = this.parseEmbedColor(link?.embed_color)
     return parsed ?? DEFAULT_EMBED_COLOR
   }
@@ -124,11 +134,14 @@ export default class Monitor {
         const playerId = parseInt(slot.text)
         const playerName = this.client.players.findPlayer(playerId)?.name
         const color = this.getPlayerEmbedColor(playerName, linkMap)
-        if (color !== DEFAULT_EMBED_COLOR || (playerName && linkMap.has(playerName))) {
+        const link = this.getLinkForPlayer(playerName, linkMap)
+
+        if (color !== DEFAULT_EMBED_COLOR || link != null) {
           return color
         }
       }
     }
+
     return DEFAULT_EMBED_COLOR
   }
 
@@ -207,8 +220,15 @@ export default class Monitor {
       return
     }
 
+    const normalizedCurrentNames = new Set(
+      Array.from(currentConnectedNames).map(name => this.normalizePlayerLinkKey(name))
+    )
+
     for (const [playerName, presence] of this.dbPresence.entries()) {
-      if (presence.status === 'online' && !currentConnectedNames.has(playerName)) {
+      if (
+        presence.status === 'online' &&
+        !normalizedCurrentNames.has(this.normalizePlayerLinkKey(playerName))
+      ) {
         this.setPlayerOfflineByName(playerName)
         await this.savePresence(playerName, 'offline', presence.game)
       }
@@ -590,7 +610,7 @@ export default class Monitor {
         case 'player_id': {
           const playerId = parseInt(slot.text)
           const playerName = this.client.players.findPlayer(playerId)?.name
-          const link = playerName ? linkMap.get(playerName) : null
+          const link = this.getLinkForPlayer(playerName, linkMap)
 
           if (link) {
             let shouldMention = true
@@ -651,7 +671,7 @@ export default class Monitor {
     const receivingPlayerName = receivingPlayer?.name
     if (!receivingPlayerName) return
 
-    const link = linkMap.get(receivingPlayerName)
+    const link = this.getLinkForPlayer(receivingPlayerName, linkMap)
     if (!link?.dm) return
     if (!link.discord_id) return
 
@@ -865,11 +885,13 @@ export default class Monitor {
     if (!this.isActive) return
 
     const links = await Database.getLinks(this.guild.id)
-    const linkMap = new Map<string, any>(links.map(l => [l.archipelago_name, l]))
+    const linkMap = new Map<string, any>(
+      links.map(l => [this.normalizePlayerLinkKey(l.archipelago_name), l])
+    )
 
     const formatPlayer = (slot: number, monitorMentionFlag: boolean = true, flagName?: string) => {
       const playerName = this.client.players.findPlayer(slot)?.name
-      const link = playerName ? linkMap.get(playerName) : null
+      const link = this.getLinkForPlayer(playerName, linkMap)
 
       if (link) {
         let shouldMention = monitorMentionFlag

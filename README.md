@@ -150,7 +150,7 @@ Once deployed, the bot provides these slash commands:
     - `mention_item_receiver` - @ you for receiving items (default: true)
     - `mention_completion` - @ you for finishing goal (default: true)
     - `mention_hints` - @ you for hints (default: true)
-    - 'dm' - Whether to DM you directly when your item is found 
+    - `dm` - Whether to DM you directly when your item is found 
 - `/unlink` - Remove a link
 - `/links` - Show all links in the server. Supports optional flags:
     - `user` - Discord user to show only their linked players

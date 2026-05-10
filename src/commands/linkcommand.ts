@@ -114,14 +114,40 @@ export default class LinkCommand extends Command {
       await Database.linkUser(interaction.guildId, player, user.id, flags, embedColor)
 
       const colorText = embedColor ? ` Embed color set to \`#${embedColor}\`.` : ''
-      const dmText = flags.dm === true
-        ? ' Direct messages enabled for received item notifications.'
-        : flags.dm === false
-          ? ' Direct messages disabled.'
-          : ''
+
+      let dmText = ''
+      let dmConfirmationText = ''
+
+      if (flags.dm === true) {
+        dmText = ' Direct messages enabled for received item notifications.'
+
+        try {
+          await user.send(
+            `Archipelago DM notifications are now enabled. I will send notifications for player: \`${player}\` via DM starting now.`
+          )
+
+          dmConfirmationText = ' I also sent them a DM confirmation.'
+        } catch (err) {
+          console.error(`Failed to send DM enabled confirmation to ${user.id}:`, err)
+          dmConfirmationText = ' I tried to send a DM confirmation, but Discord blocked it or the DM could not be delivered.'
+        }
+      } else if (flags.dm === false) {
+        dmText = ' Direct messages disabled.'
+
+        try {
+          await user.send(
+            `Archipelago DM notifications are now disabled. I will no longer send item notifications for player: \`${player}\` via DM.`
+          )
+
+          dmConfirmationText = ' I also sent them a DM confirmation.'
+        } catch (err) {
+          console.error(`Failed to send DM disabled confirmation to ${user.id}:`, err)
+          dmConfirmationText = ' I tried to send a DM confirmation, but Discord blocked it or the DM could not be delivered.'
+        }
+      }
 
       await interaction.reply({
-        content: `Linked Archipelago player **${player}** to <@${user.id}>.${colorText}${dmText} Existing notification settings were preserved unless you changed them.`,
+        content: `Linked Archipelago player **${player}** to <@${user.id}>.${colorText}${dmText}${dmConfirmationText} Existing notification settings were preserved unless you changed them.`,
         flags: [MessageFlags.Ephemeral]
       })
     } catch (err) {
