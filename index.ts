@@ -158,73 +158,58 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const page = parseInt(parts[2] ?? '0')
         const roomKey = decodeURIComponent(encodedRoomKey)
 
-        const monitor = Monitors.getByRoomKey(roomKey)
-
-        if (monitor != null) {
-          if (!monitor.isConnectedToRoom()) {
-            monitor.resetReconnectAttempts()
-            void monitor.reconnect()
-          }
-
-          const view = await buildConnectionsView(interaction.guildId, page)
-          await interaction.update(view)
-          return
-        }
-
-        const [hostPort, channel] = roomKey.split('|')
-        if (!hostPort || !channel) {
-          await interaction.reply({
-            content: 'Invalid room key.',
-            flags: [MessageFlags.Ephemeral]
-          })
-          return
-        }
-
-        const lastColon = hostPort.lastIndexOf(':')
-        if (lastColon === -1) {
-          await interaction.reply({
-            content: 'Invalid room key.',
-            flags: [MessageFlags.Ephemeral]
-          })
-          return
-        }
-
-        const host = hostPort.slice(0, lastColon).trim()
-        const port = parseInt(hostPort.slice(lastColon + 1), 10)
-
-        if (!host || !Number.isFinite(port)) {
-          await interaction.reply({
-            content: 'Invalid room key.',
-            flags: [MessageFlags.Ephemeral]
-          })
-          return
-        }
-
-        const savedConnections = await Database.getConnections()
-        const matchingConnections = savedConnections.filter((connection: any) =>
-          String(connection.host).trim() === host &&
-          Number(connection.port) === port &&
-          String(connection.channel) === channel
-        )
-
-        if (matchingConnections.length === 0) {
-          await interaction.reply({
-            content: 'No saved connection was found for that room.',
-            flags: [MessageFlags.Ephemeral]
-          })
-          return
-        }
-
         await interaction.deferUpdate()
 
-        for (const connection of matchingConnections) {
-          Monitors.make(connection, client).catch(err => {
-            console.error(`Failed to reconnect saved monitor ${connection.host}:${connection.port}:`, err)
+        const savedConnections = await Database.getConnections()
+
+        const matchingConnections = savedConnections.filter((connection: any) => {
+          const savedRoomKey = `${String(connection.host).trim()}:${Number(connection.port)}|${String(connection.channel)}`
+          return savedRoomKey === roomKey
+        })
+
+        if (matchingConnections.length === 0) {
+          const view = await buildConnectionsView(interaction.guildId, page)
+          await interaction.editReply(view)
+
+          await interaction.followUp({
+            content: 'No saved connection was found for that room, so I could not reconnect it.',
+            flags: [MessageFlags.Ephemeral]
           })
+          return
+        }
+
+        try {
+          await Monitors.removeByRoomKey(roomKey, false)
+        } catch (err) {
+          console.error(`Failed to disconnect old monitor for ${roomKey}:`, err)
+        }
+
+        const reconnectErrors: unknown[] = []
+
+        for (const connection of matchingConnections) {
+          try {
+            await Monitors.make(connection, client)
+          } catch (err) {
+            reconnectErrors.push(err)
+            console.error(`Failed to restart monitor ${connection.host}:${connection.port}:`, err)
+          }
         }
 
         const view = await buildConnectionsView(interaction.guildId, page)
         await interaction.editReply(view)
+
+        if (reconnectErrors.length > 0) {
+          await interaction.followUp({
+            content: `I disconnected the old monitor, but failed to reconnect ${reconnectErrors.length} saved connection${reconnectErrors.length === 1 ? '' : 's'} for this room.`,
+            flags: [MessageFlags.Ephemeral]
+          })
+        } else {
+          await interaction.followUp({
+            content: 'Disconnected the old monitor and started a fresh connection for that room.',
+            flags: [MessageFlags.Ephemeral]
+          })
+        }
+
         return
       }
 
