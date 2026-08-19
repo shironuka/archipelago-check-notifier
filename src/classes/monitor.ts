@@ -15,6 +15,7 @@ import {
 import MonitorData from './monitordata'
 import RandomHelper from '../utils/randohelper'
 import Database from '../utils/database'
+import { getCurrentRoomConnectInfo } from '../utils/archipelagoroom'
 
 type PresenceState = 'online' | 'offline' | 'unknown'
 type ConnectionState = 'connected' | 'reconnecting' | 'disconnected'
@@ -49,6 +50,9 @@ export default class Monitor {
   reconnectTimeout: NodeJS.Timeout | null = null
   reconnectAttempts: number = 0
   connectionState: ConnectionState = 'connected'
+
+  roomKeepAliveInterval: NodeJS.Timeout | null = null
+  readonly roomKeepAliveMs: number = 55 * 60 * 1000
 
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
@@ -104,6 +108,88 @@ export default class Monitor {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout)
       this.reconnectTimeout = null
+    }
+  }
+
+  private startRoomKeepAlive () {
+    if (this.roomKeepAliveInterval != null) return
+
+    const roomUrl = this.data.room_url?.trim()
+
+    if (!roomUrl) {
+      console.log(`Room keep-alive skipped for ${this.getRoomLabel()}; no room_url saved.`)
+      return
+    }
+
+    console.log(`Starting room keep-alive for ${this.getRoomLabel()} using ${roomUrl}`)
+
+    this.roomKeepAliveInterval = setInterval(() => {
+      void this.runRoomKeepAlive()
+    }, this.roomKeepAliveMs)
+
+    ;(this.roomKeepAliveInterval as any).unref?.()
+  }
+
+  private stopRoomKeepAlive () {
+    if (this.roomKeepAliveInterval == null) return
+
+    clearInterval(this.roomKeepAliveInterval)
+    this.roomKeepAliveInterval = null
+
+    console.log(`Stopped room keep-alive for ${this.getRoomLabel()}`)
+  }
+
+  private async runRoomKeepAlive () {
+    if (!this.isActive) return
+
+    const roomUrl = this.data.room_url?.trim()
+    if (!roomUrl) return
+
+    const previousHost = this.data.host.trim()
+    const previousPort = Number(this.data.port)
+
+    try {
+      const roomInfo = await getCurrentRoomConnectInfo(roomUrl)
+
+      if (roomInfo == null) {
+        console.warn(`Room keep-alive fetched ${roomUrl}, but no connect info was found.`)
+        return
+      }
+
+      const newHost = roomInfo.host.trim()
+      const newPort = Number(roomInfo.port)
+
+      if (!newHost || !Number.isFinite(newPort)) {
+        console.warn(`Room keep-alive got invalid connect info from ${roomUrl}.`)
+        return
+      }
+
+      if (newHost !== previousHost || newPort !== previousPort) {
+        console.warn(
+          `Room keep-alive detected port change for ${roomUrl}: ${previousHost}:${previousPort} -> ${newHost}:${newPort}`
+        )
+
+        try {
+          await Database.updateConnectionHostPortForRoom(
+            previousHost,
+            previousPort,
+            String(this.channel.id),
+            newHost,
+            newPort
+          )
+
+          this.data.host = newHost
+          this.data.port = newPort
+        } catch (err) {
+          console.error('Failed to update DB after room keep-alive port change:', err)
+        }
+
+        return
+      }
+
+      console.log(`Room keep-alive OK for ${newHost}:${newPort}`)
+    } catch (err) {
+      console.error(`Room keep-alive failed for ${this.getRoomLabel()}:`, err)
     }
   }
 
@@ -363,6 +449,7 @@ export default class Monitor {
   }
 
   stop () {
+    this.stopRoomKeepAlive()
     this.isActive = false
     this.isReconnecting = false
     this.connectionState = 'disconnected'
@@ -811,7 +898,7 @@ export default class Monitor {
 
     this.channel = channel
     this.guild = channel.guild
-
+    this.startRoomKeepAlive
     this.startPresenceSuppressWindow()
 
     void this.loadPresenceFromDb()
