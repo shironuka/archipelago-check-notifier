@@ -25,27 +25,45 @@ function getByRoomKey (roomKey: string) {
   )
 }
 
-function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
-  data.host = data.host.trim()
-  data.player = data.player.trim()
-  data.game = data.game?.trim()
+function normalizeMonitorData (data: MonitorData) {
+  const normalized = new MonitorData(data)
 
-  const uri = `${data.host}:${data.port}`
-  const roomKey = getRoomKeyFromData(data)
+  normalized.host = normalized.host.trim()
+  normalized.player = normalized.player.trim()
+  normalized.game = normalized.game?.trim()
+  normalized.channel = normalized.channel.trim()
+  normalized.room_url = normalized.room_url?.trim() || null
+
+  return normalized
+}
+
+function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
+  const monitorData = normalizeMonitorData(data)
+
+  const uri = `${monitorData.host}:${monitorData.port}`
+  const roomKey = getRoomKeyFromData(monitorData)
 
   const existing = getByRoomKey(roomKey)
 
   if (existing != null) {
-    existing.addTrackedPlayer(data)
-    console.log(`Added ${data.player} to existing monitor ${uri}`)
+    if (monitorData.room_url != null) {
+      existing.data.room_url = monitorData.room_url
+    }
+
+    existing.addTrackedPlayer(monitorData)
+    console.log(`Added ${monitorData.player} to existing monitor ${uri}`)
     return Promise.resolve(existing)
   }
 
   const pending = pendingRoomConnections.get(roomKey)
   if (pending != null) {
     return pending.then((monitor) => {
-      monitor.addTrackedPlayer(data)
-      console.log(`Added ${data.player} to pending monitor ${uri}`)
+      if (monitorData.room_url != null) {
+        monitor.data.room_url = monitorData.room_url
+      }
+
+      monitor.addTrackedPlayer(monitorData)
+      console.log(`Added ${monitorData.player} to pending monitor ${uri}`)
       return monitor
     })
   }
@@ -61,23 +79,24 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
     console.log('=== LOGIN DEBUG ===')
     console.log({
       uri,
-      host: data.host,
-      port: data.port,
-      player: data.player,
-      game: data.game,
+      host: monitorData.host,
+      port: monitorData.port,
+      player: monitorData.player,
+      game: monitorData.game,
+      room_url: monitorData.room_url,
       connectionOptions
     })
     console.log('===================')
 
-    const loginPromise = data.game != null && data.game.length > 0
-      ? archi.login(uri, data.player, data.game, connectionOptions)
-      : archi.login(uri, data.player, undefined, connectionOptions)
+    const loginPromise = monitorData.game != null && monitorData.game.length > 0
+      ? archi.login(uri, monitorData.player, monitorData.game, connectionOptions)
+      : archi.login(uri, monitorData.player, undefined, connectionOptions)
 
     loginPromise.then(() => {
-      console.log(`Connected successfully to ${uri} as ${data.player}`)
+      console.log(`Connected successfully to ${uri} as ${monitorData.player}`)
 
-      const monitor = new Monitor(archi, data, client)
-      monitor.addTrackedPlayer(data)
+      const monitor = new Monitor(archi, monitorData, client)
+      monitor.addTrackedPlayer(monitorData)
 
       Database.createLog(monitor.guild.id, '0', `Connected to ${uri}`)
       monitors.push(monitor)
@@ -86,8 +105,9 @@ function make (data: MonitorData, client: DiscordClient): Promise<Monitor> {
       console.error('=== LOGIN FAILED ===')
       console.error({
         uri,
-        player: data.player,
-        game: data.game,
+        player: monitorData.player,
+        game: monitorData.game,
+        room_url: monitorData.room_url,
         error: err
       })
       console.error('====================')

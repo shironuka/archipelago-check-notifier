@@ -185,9 +185,10 @@ Once deployed, the bot provides these slash commands:
 │   │   ├── unlinkcommand.ts            # /unlink slash command
 │   │   └── unmonitorcommand.ts         # /unmonitor slash command
 │   └── utils/
-│       ├── database.ts       # MySQL database operations
-│       ├── monitor.ts        # Monitor helper file
-│       └── randohelper.ts    # Player helper file
+│       ├── archipelagoroom.ts   # Fetch, wake-up room, reconnect
+│       ├── database.ts          # MySQL database operations
+│       ├── monitor.ts           # Monitor helper file
+│       └── randohelper.ts       # Player helper file
 ├── tsconfig.json         # TypeScript configuration
 └── package.json          # Dependencies and scripts
 ```

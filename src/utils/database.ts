@@ -20,7 +20,8 @@ async function migrate (): Promise<void> {
       port INT,
       game VARCHAR(255),
       player VARCHAR(255),
-      channel VARCHAR(255)
+      channel VARCHAR(255),
+      room_url VARCHAR(512) NULL
     )
   `)
 
@@ -61,6 +62,9 @@ async function migrate (): Promise<void> {
   const [connectionColumns]: any = await pool.query('SHOW COLUMNS FROM connections')
   const connectionColumnNames = connectionColumns.map((c: any) => c.Field)
 
+  if (!connectionColumnNames.includes('room_url')) {
+    await pool.query('ALTER TABLE connections ADD COLUMN room_url VARCHAR(512) NULL')
+  }
   if (!connectionColumnNames.includes('mention_join_leave')) {
     await pool.query('ALTER TABLE connections ADD COLUMN mention_join_leave TINYINT(1) DEFAULT 0')
   }
@@ -110,6 +114,18 @@ async function migrate (): Promise<void> {
   }
   if (!presenceColumnNames.includes('completed_at')) {
     await pool.query('ALTER TABLE presence_status ADD COLUMN completed_at TIMESTAMP NULL DEFAULT NULL')
+  }
+}
+
+function normalizeConnectionRow (row: any): Connection & { room_url?: string | null } {
+  return {
+    ...row,
+    room_url: row.room_url ?? null,
+    mention_join_leave: !!row.mention_join_leave,
+    mention_item_finder: !!row.mention_item_finder,
+    mention_item_receiver: !!row.mention_item_receiver,
+    mention_completion: !!row.mention_completion,
+    mention_hints: !!row.mention_hints
   }
 }
 
@@ -222,15 +238,7 @@ async function createLog (guildId: string, userId: string, action: string) {
 
 async function getConnections (): Promise<Connection[]> {
   const [rows] = await pool.query('SELECT * FROM connections')
-
-  return (rows as any[]).map(row => ({
-    ...row,
-    mention_join_leave: !!row.mention_join_leave,
-    mention_item_finder: !!row.mention_item_finder,
-    mention_item_receiver: !!row.mention_item_receiver,
-    mention_completion: !!row.mention_completion,
-    mention_hints: !!row.mention_hints
-  }))
+  return (rows as any[]).map(normalizeConnectionRow)
 }
 
 async function getConnection (id: number): Promise<Connection | null> {
@@ -239,14 +247,7 @@ async function getConnection (id: number): Promise<Connection | null> {
     [id]
   )
 
-  const connections = (rows as any[]).map(row => ({
-    ...row,
-    mention_join_leave: !!row.mention_join_leave,
-    mention_item_finder: !!row.mention_item_finder,
-    mention_item_receiver: !!row.mention_item_receiver,
-    mention_completion: !!row.mention_completion,
-    mention_hints: !!row.mention_hints
-  }))
+  const connections = (rows as any[]).map(normalizeConnectionRow)
 
   return connections.length > 0 ? connections[0] : null
 }
@@ -259,18 +260,20 @@ async function makeConnection (data: MonitorData): Promise<number> {
       game,
       player,
       channel,
+      room_url,
       mention_join_leave,
       mention_item_finder,
       mention_item_receiver,
       mention_completion,
       mention_hints
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.host,
       data.port,
       data.game,
       data.player,
       data.channel,
+      (data as any).room_url ?? null,
       data.mention_join_leave,
       data.mention_item_finder,
       data.mention_item_receiver,
@@ -302,6 +305,29 @@ async function removeConnectionsForRoom (host: string, port: number, channel: st
   )
 }
 
+async function updateConnectionHostPortForRoom (
+  oldHost: string,
+  oldPort: number,
+  channel: string,
+  newHost: string,
+  newPort: number
+) {
+  await pool.query(
+    'UPDATE connections SET host = ?, port = ? WHERE host = ? AND port = ? AND channel = ?',
+    [newHost, newPort, oldHost, oldPort, channel]
+  )
+}
+
+async function updateConnectionRoomUrl (
+  id: number,
+  roomUrl: string | null
+) {
+  await pool.query(
+    'UPDATE connections SET room_url = ? WHERE id = ?',
+    [roomUrl, id]
+  )
+}
+
 async function findConnectionsByUri (uri: string): Promise<Connection[]> {
   const [hostRaw, portRaw] = uri.split(':')
   const host = hostRaw?.trim()
@@ -314,14 +340,7 @@ async function findConnectionsByUri (uri: string): Promise<Connection[]> {
     [host, port]
   )
 
-  return (rows as any[]).map(row => ({
-    ...row,
-    mention_join_leave: !!row.mention_join_leave,
-    mention_item_finder: !!row.mention_item_finder,
-    mention_item_receiver: !!row.mention_item_receiver,
-    mention_completion: !!row.mention_completion,
-    mention_hints: !!row.mention_hints
-  }))
+  return (rows as any[]).map(normalizeConnectionRow)
 }
 
 async function findConnectionsByGuildAndUri (guildId: string, uri: string): Promise<Connection[]> {
@@ -420,6 +439,8 @@ const Database = {
   makeConnection,
   removeConnection,
   removeConnectionsForRoom,
+  updateConnectionHostPortForRoom,
+  updateConnectionRoomUrl,
   findConnectionsByUri,
   findConnectionsByGuildAndUri,
   createLog,

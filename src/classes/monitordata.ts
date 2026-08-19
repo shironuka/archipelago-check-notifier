@@ -5,8 +5,9 @@ export default class MonitorData {
   player: string
   game?: string
   channel: string
+  room_url?: string | null
 
-  // mention settings (optional but used elsewhere)
+  // mention settings
   mention_join_leave: boolean
   mention_item_finder: boolean
   mention_item_receiver: boolean
@@ -20,6 +21,7 @@ export default class MonitorData {
     this.player = data.player ?? ''
     this.game = data.game
     this.channel = data.channel ?? ''
+    this.room_url = data.room_url ?? null
 
     this.mention_join_leave = data.mention_join_leave ?? true
     this.mention_item_finder = data.mention_item_finder ?? true

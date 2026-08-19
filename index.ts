@@ -15,8 +15,102 @@ import Monitors from './src/utils/monitors'
 import { Connection } from './src/classes/connection'
 import { buildConnectionsView } from './src/commands/connectionscommand'
 import { buildLinksView } from './src/commands/linkscommand'
+import { getCurrentRoomConnectInfo } from './src/utils/archipelagoroom'
+
+type SavedConnection = Connection & {
+  room_url?: string | null
+}
 
 const client = new Client({ intents: ['Guilds'] })
+
+function sleep (ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function getSavedRoomKey (connection: SavedConnection) {
+  return `${String(connection.host).trim()}:${Number(connection.port)}|${String(connection.channel)}`
+}
+
+function getFirstRoomUrl (connections: SavedConnection[]) {
+  return connections
+    .map(connection => connection.room_url?.trim())
+    .find(roomUrl => roomUrl != null && roomUrl.length > 0) ?? null
+}
+
+async function refreshConnectionsFromRoomUrl (connections: SavedConnection[]) {
+  const firstConnection = connections[0]
+
+  if (firstConnection == null) {
+    return {
+      attempted: false,
+      changed: false,
+      message: 'No saved connections were available to refresh.'
+    }
+  }
+
+  const roomUrl = getFirstRoomUrl(connections)
+
+  if (roomUrl == null) {
+    return {
+      attempted: false,
+      changed: false,
+      message: 'No room URL is saved for this room.'
+    }
+  }
+
+  const oldHost = String(firstConnection.host).trim()
+  const oldPort = Number(firstConnection.port)
+  const channel = String(firstConnection.channel)
+
+  const currentRoomInfo = await getCurrentRoomConnectInfo(roomUrl)
+
+  if (currentRoomInfo == null) {
+    return {
+      attempted: true,
+      changed: false,
+      message: `Fetched the room page, but could not find a current /connect address.`
+    }
+  }
+
+  const newHost = currentRoomInfo.host.trim()
+  const newPort = Number(currentRoomInfo.port)
+
+  if (!newHost || !Number.isFinite(newPort)) {
+    return {
+      attempted: true,
+      changed: false,
+      message: `Fetched the room page, but the parsed connect address was invalid.`
+    }
+  }
+
+  const changed = newHost !== oldHost || newPort !== oldPort
+
+  if (changed) {
+    await Database.updateConnectionHostPortForRoom(
+      oldHost,
+      oldPort,
+      channel,
+      newHost,
+      newPort
+    )
+
+    for (const connection of connections) {
+      connection.host = newHost
+      connection.port = newPort
+    }
+  }
+
+  // Give archipelago.gg a moment after the room page is fetched/woken.
+  await sleep(1500)
+
+  return {
+    attempted: true,
+    changed,
+    message: changed
+      ? `Room page refreshed. Updated connection from ${oldHost}:${oldPort} to ${newHost}:${newPort}.`
+      : `Room page refreshed. Connection is still ${newHost}:${newPort}.`
+  }
+}
 
 client.on(Events.ClientReady, async () => {
   console.log('DB HOST:', process.env.MYSQLHOST)
@@ -39,11 +133,24 @@ client.on(Events.ClientReady, async () => {
   }
 
   try {
-    const connections: Connection[] = await Database.getConnections()
+    const connections: SavedConnection[] = await Database.getConnections()
     console.log(`Reconnecting to ${connections.length} monitors...`)
 
     for (const result of connections) {
-      Monitors.make(result, client).catch(err => {
+      const startMonitor = async () => {
+        try {
+          const refreshResult = await refreshConnectionsFromRoomUrl([result])
+          if (refreshResult.attempted) {
+            console.log(refreshResult.message)
+          }
+        } catch (err) {
+          console.error(`Failed to refresh room URL for ${result.host}:${result.port}:`, err)
+        }
+
+        await Monitors.make(result, client)
+      }
+
+      startMonitor().catch(err => {
         console.error(`Failed to reconnect to monitor ${result.host}:${result.port}:`, err)
 
         const channel = client.channels.cache.get(result.channel)
@@ -160,11 +267,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.deferUpdate()
 
-        const savedConnections = await Database.getConnections()
+        const savedConnections: SavedConnection[] = await Database.getConnections()
 
-        const matchingConnections = savedConnections.filter((connection: any) => {
-          const savedRoomKey = `${String(connection.host).trim()}:${Number(connection.port)}|${String(connection.channel)}`
-          return savedRoomKey === roomKey
+        const matchingConnections = savedConnections.filter((connection) => {
+          return getSavedRoomKey(connection) === roomKey
         })
 
         if (matchingConnections.length === 0) {
@@ -176,6 +282,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
             flags: [MessageFlags.Ephemeral]
           })
           return
+        }
+
+        let refreshMessage = ''
+        try {
+          const refreshResult = await refreshConnectionsFromRoomUrl(matchingConnections)
+          refreshMessage = refreshResult.message
+        } catch (err) {
+          console.error(`Failed to refresh room page for ${roomKey}:`, err)
+          refreshMessage = 'Tried to refresh the room page, but it failed. I attempted reconnect with the saved host and port.'
         }
 
         try {
@@ -200,12 +315,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (reconnectErrors.length > 0) {
           await interaction.followUp({
-            content: `I disconnected the old monitor, but failed to reconnect ${reconnectErrors.length} saved connection${reconnectErrors.length === 1 ? '' : 's'} for this room.`,
+            content: `${refreshMessage} I disconnected the old monitor, but failed to reconnect ${reconnectErrors.length} saved connection${reconnectErrors.length === 1 ? '' : 's'} for this room.`,
             flags: [MessageFlags.Ephemeral]
           })
         } else {
           await interaction.followUp({
-            content: 'Disconnected the old monitor and started a fresh connection for that room.',
+            content: `${refreshMessage} Disconnected the old monitor and started a fresh connection for that room.`,
             flags: [MessageFlags.Ephemeral]
           })
         }
@@ -261,7 +376,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith('remonitor:')) {
         const connectionId = parseInt(interaction.customId.split(':')[1])
-        const connection = await Database.getConnection(connectionId)
+        const connection = await Database.getConnection(connectionId) as SavedConnection | null
 
         if (!connection) {
           await interaction.reply({
@@ -271,20 +386,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return
         }
 
-        if (Monitors.has(`${connection.host}:${connection.port}`)) {
-          await Monitors.remove(`${connection.host}:${connection.port}`, false)
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] })
+
+        const oldUri = `${connection.host}:${connection.port}`
+
+        let refreshMessage = ''
+        try {
+          const refreshResult = await refreshConnectionsFromRoomUrl([connection])
+          refreshMessage = refreshResult.message
+        } catch (err) {
+          console.error(`Failed to refresh room URL for ${oldUri}:`, err)
+          refreshMessage = 'Tried to refresh the room page, but it failed. I attempted reconnect with the saved host and port.'
         }
 
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] })
+        const newUri = `${connection.host}:${connection.port}`
+
+        if (Monitors.has(oldUri)) {
+          await Monitors.remove(oldUri, false)
+        }
+
+        if (newUri !== oldUri && Monitors.has(newUri)) {
+          await Monitors.remove(newUri, false)
+        }
 
         Monitors.make(connection, client).then(() => {
           interaction.editReply({
-            content: `Now monitoring Archipelago on ${connection.host}:${connection.port}.`
+            content: `${refreshMessage} Now monitoring Archipelago on ${connection.host}:${connection.port}.`
           })
         }).catch(err => {
           console.error('Failed to create monitor:', err)
           interaction.editReply({
-            content: 'Failed to connect to Archipelago. Please check if the server is up.'
+            content: `${refreshMessage} Failed to connect to Archipelago. Please check if the server is up.`
           })
         })
 

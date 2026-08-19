@@ -11,6 +11,19 @@ import MonitorData from '../classes/monitordata'
 import Monitors from '../utils/monitors'
 import Database from '../utils/database'
 
+function normalizeRoomUrl (raw?: string | null): string | null {
+  const value = raw?.trim()
+  if (!value) return null
+
+  const normalized = value.replace(/\/+$/, '')
+
+  if (!/^https?:\/\/archipelago\.gg\/room\/[^/\s?#]+/i.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
 export default class MonitorCommand extends Command {
   name = 'monitor'
   description = 'Start tracking an Archipelago session (archipelago.gg).'
@@ -33,6 +46,12 @@ export default class MonitorCommand extends Command {
       type: ApplicationCommandOptionType.String,
       name: 'game',
       description: 'Optional game name',
+      required: false
+    },
+    {
+      type: ApplicationCommandOptionType.String,
+      name: 'room_url',
+      description: 'Optional Archipelago room page URL, used to wake/reconnect inactive rooms',
       required: false
     },
     {
@@ -121,60 +140,118 @@ export default class MonitorCommand extends Command {
     await interaction.respond([])
   }
 
-  execute (interaction: ChatInputCommandInteraction) {
+  async execute (interaction: ChatInputCommandInteraction) {
+    if (!interaction.guildId) {
+      await interaction.reply({
+        content: 'This command can only be used in a server.',
+        flags: [MessageFlags.Ephemeral]
+      })
+      return
+    }
+
     const game = interaction.options.getString('game')?.trim()
+    const rawRoomUrl = interaction.options.getString('room_url')?.trim()
+    const roomUrl = normalizeRoomUrl(rawRoomUrl)
+
+    if (rawRoomUrl && roomUrl == null) {
+      await interaction.reply({
+        content: 'Invalid room_url. Use the Archipelago room page URL, like `https://archipelago.gg/room/abc123`.',
+        flags: [MessageFlags.Ephemeral]
+      })
+      return
+    }
+
     const explicitChannel = interaction.options.getChannel('channel')
     const fallbackChannelId = process.env.LOG_CHANNEL?.trim()
     const resolvedChannelId = explicitChannel?.id ?? fallbackChannelId
 
     if (!resolvedChannelId) {
-      void interaction.reply({
+      await interaction.reply({
         content: 'No channel was provided and LOG_CHANNEL is not set.',
         flags: [MessageFlags.Ephemeral]
       })
       return
     }
 
-    const monitorData: MonitorData = {
+    const monitorData = new MonitorData({
       host: 'archipelago.gg',
       port: interaction.options.getInteger('port', true),
       player: interaction.options.getString('player', true).trim(),
       channel: resolvedChannelId,
       game: game && game.length > 0 ? game : undefined,
+      room_url: roomUrl,
       mention_join_leave: interaction.options.getBoolean('mention_join_leave') ?? false,
       mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? true,
       mention_item_receiver: interaction.options.getBoolean('mention_item_receiver') ?? true,
       mention_completion: interaction.options.getBoolean('mention_completion') ?? true,
       mention_hints: interaction.options.getBoolean('mention_hints') ?? true
-    }
+    })
 
     const uri = `${monitorData.host}:${monitorData.port}`
 
     if (Monitors.has(uri)) {
-      void interaction.reply({
+      if (roomUrl != null) {
+        try {
+          const savedConnections = await Database.getConnections()
+          const matchingConnections = savedConnections.filter((connection: any) =>
+            String(connection.host).trim() === monitorData.host &&
+            Number(connection.port) === monitorData.port &&
+            String(connection.channel) === String(resolvedChannelId)
+          )
+
+          for (const connection of matchingConnections) {
+            await Database.updateConnectionRoomUrl(Number(connection.id), roomUrl)
+          }
+
+          const liveMonitor = Monitors.getByRoomKey(Monitors.getRoomKeyFromData(monitorData))
+          if (liveMonitor != null) {
+            liveMonitor.data.room_url = roomUrl
+          }
+
+          await interaction.reply({
+            content: `Already monitoring ${uri}. Saved room URL for reconnect wake-ups: ${roomUrl}`,
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        } catch (err) {
+          console.error('Failed to update saved room URL:', err)
+          await interaction.reply({
+            content: `Already monitoring ${uri}, but I failed to save the room URL.`,
+            flags: [MessageFlags.Ephemeral]
+          })
+          return
+        }
+      }
+
+      await interaction.reply({
         content: `Already monitoring ${uri}.`,
         flags: [MessageFlags.Ephemeral]
       })
       return
     }
 
-    void interaction.reply({
-      content: `Attempting to monitor ${uri}...`,
+    await interaction.reply({
+      content: roomUrl != null
+        ? `Attempting to monitor ${uri} with room wake URL saved...`
+        : `Attempting to monitor ${uri}...`,
       flags: [MessageFlags.Ephemeral]
     })
 
     Monitors.make(monitorData, this.client)
       .then(async (monitor) => {
         monitor.data.id = await Database.makeConnection(monitorData)
+
         await interaction.followUp({
-          content: `Now monitoring ${uri} in <#${resolvedChannelId}>.`,
+          content: roomUrl != null
+            ? `Now monitoring ${uri} in <#${resolvedChannelId}>. Room wake URL saved.`
+            : `Now monitoring ${uri} in <#${resolvedChannelId}>.`,
           flags: [MessageFlags.Ephemeral]
         })
       })
       .catch(async (err) => {
         console.error('Failed to create monitor:', err)
         await interaction.followUp({
-          content: 'Failed to connect. Check port, player, and optional game.',
+          content: 'Failed to connect. Check port, player, optional game, and room URL.',
           flags: [MessageFlags.Ephemeral]
         })
       })
