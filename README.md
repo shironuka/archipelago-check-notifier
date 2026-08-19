@@ -133,8 +133,9 @@ In Railway, go to your bot service and add these variables:
 
 Once deployed, the bot provides these slash commands:
 
-- `/monitor` - Start monitoring an Archipelago session with specified port and player. Uses archipelago.gg as the host by default. Supports optional flags to configure mentions:
+- `/monitor` - Start monitoring an Archipelago room and player. Provide full room url such as https://archipelago.gg/room/HEnPW6ZoRg-fL5k5A-6XwA. Supports optional flags to configure mentions:
     - `game` - Optional game name
+    - `port` - Optional room port
     - `channel` - Optinal channel to send messages to. Uses LOG_CHANNEL if omitted.
     - `mention_join_leave` - @ for join/leave (default: false)
     - `mention_item_finder` - @ for finding items (default: false)
