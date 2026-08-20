@@ -68,7 +68,7 @@ async function refreshConnectionsFromRoomUrl (connections: SavedConnection[]) {
     return {
       attempted: true,
       changed: false,
-      message: `Fetched the room page, but could not find a current /connect address.`
+      message: 'Fetched the room page, but could not find a current /connect address.'
     }
   }
 
@@ -79,7 +79,7 @@ async function refreshConnectionsFromRoomUrl (connections: SavedConnection[]) {
     return {
       attempted: true,
       changed: false,
-      message: `Fetched the room page, but the parsed connect address was invalid.`
+      message: 'Fetched the room page, but the parsed connect address was invalid.'
     }
   }
 
@@ -101,7 +101,7 @@ async function refreshConnectionsFromRoomUrl (connections: SavedConnection[]) {
   }
 
   // Give archipelago.gg a moment after the room page is fetched/woken.
-  await sleep(1500)
+  await sleep(3000)
 
   return {
     attempted: true,
@@ -110,6 +110,37 @@ async function refreshConnectionsFromRoomUrl (connections: SavedConnection[]) {
       ? `Room page refreshed. Updated connection from ${oldHost}:${oldPort} to ${newHost}:${newPort}.`
       : `Room page refreshed. Connection is still ${newHost}:${newPort}.`
   }
+}
+
+async function reconnectSavedConnectionWithRetries (
+  connection: SavedConnection,
+  attempts: number = 5,
+  delayMs: number = 5000
+) {
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      console.log(
+        `Reconnect attempt ${attempt}/${attempts} for ${connection.host}:${connection.port} as ${connection.player}`
+      )
+
+      return await Monitors.make(connection, client)
+    } catch (err) {
+      lastError = err
+
+      console.error(
+        `Reconnect attempt ${attempt}/${attempts} failed for ${connection.host}:${connection.port} as ${connection.player}:`,
+        err
+      )
+
+      if (attempt < attempts) {
+        await sleep(delayMs)
+      }
+    }
+  }
+
+  throw lastError
 }
 
 client.on(Events.ClientReady, async () => {
@@ -147,7 +178,7 @@ client.on(Events.ClientReady, async () => {
           console.error(`Failed to refresh room URL for ${result.host}:${result.port}:`, err)
         }
 
-        await Monitors.make(result, client)
+        await reconnectSavedConnectionWithRetries(result, 5, 5000)
       }
 
       startMonitor().catch(err => {
@@ -303,7 +334,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         for (const connection of matchingConnections) {
           try {
-            await Monitors.make(connection, client)
+            await reconnectSavedConnectionWithRetries(connection, 5, 5000)
           } catch (err) {
             reconnectErrors.push(err)
             console.error(`Failed to restart monitor ${connection.host}:${connection.port}:`, err)
@@ -315,7 +346,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (reconnectErrors.length > 0) {
           await interaction.followUp({
-            content: `${refreshMessage} I disconnected the old monitor, but failed to reconnect ${reconnectErrors.length} saved connection${reconnectErrors.length === 1 ? '' : 's'} for this room.`,
+            content: `${refreshMessage} I disconnected the old monitor, but failed to reconnect ${reconnectErrors.length} saved connection${reconnectErrors.length === 1 ? '' : 's'} for this room after multiple attempts.`,
             flags: [MessageFlags.Ephemeral]
           })
         } else {
@@ -409,14 +440,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await Monitors.remove(newUri, false)
         }
 
-        Monitors.make(connection, client).then(() => {
+        reconnectSavedConnectionWithRetries(connection, 5, 5000).then(() => {
           interaction.editReply({
             content: `${refreshMessage} Now monitoring Archipelago on ${connection.host}:${connection.port}.`
           })
         }).catch(err => {
           console.error('Failed to create monitor:', err)
           interaction.editReply({
-            content: `${refreshMessage} Failed to connect to Archipelago. Please check if the server is up.`
+            content: `${refreshMessage} Failed to connect to Archipelago after multiple attempts. Please check if the server is up.`
           })
         })
 
