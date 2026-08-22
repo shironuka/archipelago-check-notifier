@@ -52,7 +52,8 @@ export default class Monitor {
   connectionState: ConnectionState = 'connected'
 
   roomKeepAliveInterval: NodeJS.Timeout | null = null
-  readonly roomKeepAliveMs: number = 55 * 60 * 1000
+  readonly roomKeepAliveMs: number = 30 * 60 * 1000
+  readonly roomWakeDelayMs: number = 3000
 
   suppressPresenceMessages: boolean = true
   suppressPresenceTimeout: NodeJS.Timeout | null = null
@@ -123,6 +124,11 @@ export default class Monitor {
 
     console.log(`Starting room keep-alive for ${this.getRoomLabel()} using ${roomUrl}`)
 
+    // Run once soon after connecting so Railway logs prove it is active.
+    setTimeout(() => {
+      void this.runRoomKeepAlive()
+    }, 10000)
+
     this.roomKeepAliveInterval = setInterval(() => {
       void this.runRoomKeepAlive()
     }, this.roomKeepAliveMs)
@@ -191,6 +197,54 @@ export default class Monitor {
     } catch (err) {
       console.error(`Room keep-alive failed for ${this.getRoomLabel()}:`, err)
     }
+  }
+
+  private async refreshRoomFromSavedUrlForReconnect () {
+    const roomUrl = this.data.room_url?.trim()
+
+    if (!roomUrl) {
+      console.log(`Reconnect room refresh skipped for ${this.getRoomLabel()}; no room_url saved.`)
+      return
+    }
+
+    const previousHost = this.data.host.trim()
+    const previousPort = Number(this.data.port)
+
+    const roomInfo = await getCurrentRoomConnectInfo(roomUrl)
+
+    if (roomInfo == null) {
+      console.warn(`Reconnect room refresh fetched ${roomUrl}, but no connect info was found.`)
+      return
+    }
+
+    const newHost = roomInfo.host.trim()
+    const newPort = Number(roomInfo.port)
+
+    if (!newHost || !Number.isFinite(newPort)) {
+      console.warn(`Reconnect room refresh got invalid connect info from ${roomUrl}.`)
+      return
+    }
+
+    if (newHost !== previousHost || newPort !== previousPort) {
+      console.warn(
+        `Reconnect room refresh detected port change for ${roomUrl}: ${previousHost}:${previousPort} -> ${newHost}:${newPort}`
+      )
+
+      await Database.updateConnectionHostPortForRoom(
+        previousHost,
+        previousPort,
+        String(this.channel.id),
+        newHost,
+        newPort
+      )
+
+      this.data.host = newHost
+      this.data.port = newPort
+    } else {
+      console.log(`Reconnect room refresh OK for ${newHost}:${newPort}`)
+    }
+
+    await new Promise(resolve => setTimeout(resolve, this.roomWakeDelayMs))
   }
 
   private sendReconnectFailureMessage () {
@@ -898,7 +952,7 @@ export default class Monitor {
 
     this.channel = channel
     this.guild = channel.guild
-    this.startRoomKeepAlive
+    this.startRoomKeepAlive()
     this.startPresenceSuppressWindow()
 
     void this.loadPresenceFromDb()
@@ -942,6 +996,12 @@ export default class Monitor {
     console.log(
       `Attempting reconnect to ${this.data.host}:${this.data.port} as ${this.data.player} (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
     )
+
+    try {
+      await this.refreshRoomFromSavedUrlForReconnect()
+    } catch (err) {
+      console.error(`Failed to refresh room page before reconnect for ${this.getRoomLabel()}:`, err)
+    }
 
     try {
       await this.client.login(
