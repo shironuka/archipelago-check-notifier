@@ -164,18 +164,19 @@ export default class MonitorAdvanceCommand extends Command {
       return
     }
 
-    const monitorData: MonitorData = {
+    const monitorData = new MonitorData({
       host,
       port: interaction.options.getInteger('port', true),
       player: interaction.options.getString('player', true).trim(),
       channel: resolvedChannelId,
       game: game && game.length > 0 ? game : undefined,
+      room_url: null,
       mention_join_leave: interaction.options.getBoolean('mention_join_leave') ?? false,
       mention_item_finder: interaction.options.getBoolean('mention_item_finder') ?? true,
       mention_item_receiver: interaction.options.getBoolean('mention_item_receiver') ?? true,
       mention_completion: interaction.options.getBoolean('mention_completion') ?? true,
       mention_hints: interaction.options.getBoolean('mention_hints') ?? true
-    }
+    })
 
     const uri = `${monitorData.host}:${monitorData.port}`
 
